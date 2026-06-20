@@ -2665,13 +2665,79 @@ function MainApp() {
   );
 }
 
+function NewPasswordScreen({ onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (password.length < 6) {
+      setError("Le mot de passe doit contenir au moins 6 caractères.");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Les deux mots de passe ne correspondent pas.");
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+    if (error) {
+      setError("Erreur : " + error.message);
+      return;
+    }
+    setSuccess(true);
+    setTimeout(() => onDone(), 1500);
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-stone-50 px-4">
+      <div className="w-full max-w-sm bg-white rounded-2xl border border-stone-200 shadow-sm p-6">
+        <div className="flex items-center gap-2.5 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center font-bold text-white text-sm">
+            DE
+          </div>
+          <div>
+            <p className="font-semibold text-stone-900 text-sm leading-tight">Distropty Eyewear</p>
+            <p className="text-xs text-stone-400">Définir un nouveau mot de passe</p>
+          </div>
+        </div>
+        {success ? (
+          <p className="text-sm text-emerald-700">Mot de passe mis à jour ! Redirection…</p>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <Field label="Nouveau mot de passe">
+              <input type="password" className={inputCls} value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
+            </Field>
+            <Field label="Confirmer le mot de passe">
+              <input type="password" className={inputCls} value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+            </Field>
+            {error && <p className="text-sm text-rose-600 mb-3">{error}</p>}
+            <button type="submit" disabled={loading} className="w-full bg-indigo-700 text-white rounded-xl py-2.5 text-sm font-medium hover:bg-indigo-800 disabled:opacity-60">
+              {loading ? "Enregistrement..." : "Enregistrer le mot de passe"}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DistroptyApp() {
   const [session, setSession] = useState(undefined); // undefined = en cours de vérification
+  const [needsNewPassword, setNeedsNewPassword] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
+      if (event === "PASSWORD_RECOVERY") {
+        setNeedsNewPassword(true);
+      }
     });
     return () => listener.subscription.unsubscribe();
   }, []);
@@ -2682,6 +2748,10 @@ export default function DistroptyApp() {
         <p className="text-stone-500 text-sm">Vérification de la connexion…</p>
       </div>
     );
+  }
+
+  if (needsNewPassword) {
+    return <NewPasswordScreen onDone={() => setNeedsNewPassword(false)} />;
   }
 
   if (!session) {
