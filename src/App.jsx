@@ -307,7 +307,21 @@ function buildDemoData() {
     minQuantity: 30,
   }));
 
-  return { employees, clients, stock, sales, expenses, fuelLogs, offers, cheques, boxStock };
+  // ---------- Sous-stock par marque + type (Optique/Solaire/Clips) ----------
+  const typeStock = [];
+  BRANDS.forEach((brand) => {
+    ["Optique", "Solaire", "Clips"].forEach((type) => {
+      typeStock.push({
+        id: uid(),
+        brand,
+        type,
+        quantity: randInt(20, 150),
+        minQuantity: 15,
+      });
+    });
+  });
+
+  return { employees, clients, stock, sales, expenses, fuelLogs, offers, cheques, boxStock, typeStock };
 }
 
 
@@ -324,10 +338,10 @@ function employeeToRow(e) {
   return { id: e.id, first_name: e.firstName, last_name: e.lastName, role: e.role, phone: e.phone, email: e.email, city: e.city, base_salary: e.baseSalary, hire_date: e.hireDate, active: e.active };
 }
 function rowToClient(r) {
-  return { id: r.id, contactName: r.contact_name, shopName: r.shop_name, phone: r.phone, email: r.email, city: r.city, brands: r.brands || [], points: r.points, totalSpent: r.total_spent, joinDate: r.join_date, lastVisit: r.last_visit };
+  return { id: r.id, contactName: r.contact_name, shopName: r.shop_name, phone: r.phone, email: r.email, city: r.city, brands: r.brands || [], points: r.points, totalSpent: r.total_spent, joinDate: r.join_date, lastVisit: r.last_visit, cashbackRate: r.cashback_rate || 0, cashbackBalance: r.cashback_balance || 0, brandTypes: r.brand_types || {} };
 }
 function clientToRow(c) {
-  return { id: c.id, contact_name: c.contactName, shop_name: c.shopName, phone: c.phone, email: c.email, city: c.city, brands: c.brands, points: c.points, total_spent: c.totalSpent, join_date: c.joinDate, last_visit: c.lastVisit };
+  return { id: c.id, contact_name: c.contactName, shop_name: c.shopName, phone: c.phone, email: c.email, city: c.city, brands: c.brands, points: c.points, total_spent: c.totalSpent, join_date: c.joinDate, last_visit: c.lastVisit, cashback_rate: c.cashbackRate || 0, cashback_balance: c.cashbackBalance || 0, brand_types: c.brandTypes || {} };
 }
 function rowToStock(r) {
   return { id: r.id, sku: r.sku, brand: r.brand, model: r.model, color: r.color, quantity: r.quantity, minQuantity: r.min_quantity, costPrice: r.cost_price, sellPrice: r.sell_price, city: r.city };
@@ -371,8 +385,14 @@ function rowToBoxStock(r) {
 function boxStockToRow(b) {
   return { id: b.id, brand: b.brand, quantity: b.quantity, min_quantity: b.minQuantity };
 }
+function rowToTypeStock(r) {
+  return { id: r.id, brand: r.brand, type: r.type, quantity: r.quantity, minQuantity: r.min_quantity };
+}
+function typeStockToRow(t) {
+  return { id: t.id, brand: t.brand, type: t.type, quantity: t.quantity, min_quantity: t.minQuantity };
+}
 
-const EMPTY_DATA = { employees: [], clients: [], stock: [], sales: [], expenses: [], fuelLogs: [], offers: [], cheques: [], boxStock: [] };
+const EMPTY_DATA = { employees: [], clients: [], stock: [], sales: [], expenses: [], fuelLogs: [], offers: [], cheques: [], boxStock: [], typeStock: [] };
 
 function useStore() {
   const [data, setDataState] = useState(EMPTY_DATA);
@@ -383,7 +403,7 @@ function useStore() {
     setLoading(true);
     setError(null);
     try {
-      const [emp, cli, stk, sal, exp, fuel, off, chq, box] = await Promise.all([
+      const [emp, cli, stk, sal, exp, fuel, off, chq, box, typ] = await Promise.all([
         supabase.from("employees").select("*").order("created_at"),
         supabase.from("clients").select("*").order("created_at"),
         supabase.from("stock").select("*").order("created_at"),
@@ -393,8 +413,9 @@ function useStore() {
         supabase.from("offers").select("*").order("created_at"),
         supabase.from("cheques").select("*").order("issue_date", { ascending: false }),
         supabase.from("box_stock").select("*").order("created_at"),
+        supabase.from("type_stock").select("*").order("created_at"),
       ]);
-      const firstError = [emp, cli, stk, sal, exp, fuel, off, chq, box].find((r) => r.error)?.error;
+      const firstError = [emp, cli, stk, sal, exp, fuel, off, chq, box, typ].find((r) => r.error)?.error;
       if (firstError) throw firstError;
       setDataState({
         employees: (emp.data || []).map(rowToEmployee),
@@ -406,6 +427,7 @@ function useStore() {
         offers: (off.data || []).map(rowToOffer),
         cheques: (chq.data || []).map(rowToCheque),
         boxStock: (box.data || []).map(rowToBoxStock),
+        typeStock: (typ.data || []).map(rowToTypeStock),
       });
     } catch (e) {
       setError(e.message || "Erreur de chargement des données");
@@ -436,6 +458,7 @@ function useStore() {
     offers: { table: "offers", toRow: offerToRow },
     cheques: { table: "cheques", toRow: chequeToRow },
     boxStock: { table: "box_stock", toRow: boxStockToRow },
+    typeStock: { table: "type_stock", toRow: typeStockToRow },
   };
 
   async function syncToSupabase(prev, next) {
@@ -1557,11 +1580,13 @@ function FuelModule({ data, setData }) {
    MODULE : CLIENTS & FIDÉLITÉ
 ============================================================ */
 
+const PRODUCT_TYPES = ["Optique", "Solaire", "Clips"];
+
 function ClientForm({ initial, onSave, onCancel }) {
   const [form, setForm] = useState(
     initial || {
       contactName: "", shopName: "", phone: "", email: "", city: CITIES[0],
-      brands: [], totalSpent: 0, points: 0, joinDate: todayISO(), lastVisit: todayISO(),
+      brands: [], brandTypes: {}, totalSpent: 0, points: 0, joinDate: todayISO(), lastVisit: todayISO(),
       cashbackRate: 0, cashbackBalance: 0,
     }
   );
@@ -1572,6 +1597,15 @@ function ClientForm({ initial, onSave, onCancel }) {
       brands: f.brands.includes(b) ? f.brands.filter((x) => x !== b) : [...f.brands, b],
     }));
   };
+  const toggleBrandType = (brand, type) => {
+    setForm((f) => {
+      const current = f.brandTypes?.[brand] || [];
+      const updated = current.includes(type) ? current.filter((x) => x !== type) : [...current, type];
+      return { ...f, brandTypes: { ...f.brandTypes, [brand]: updated } };
+    });
+  };
+
+  const cashbackPreview = (form.totalSpent || 0) * ((Number(form.cashbackRate) || 0) / 100);
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); onSave({ ...form, cashbackRate: Number(form.cashbackRate) || 0 }); }}>
@@ -1588,22 +1622,42 @@ function ClientForm({ initial, onSave, onCancel }) {
           {CITIES.map((c) => <option key={c}>{c}</option>)}
         </select>
       </Field>
-      <Field label="Marques distribuées">
-        <div className="flex gap-2 flex-wrap">
+      <Field label="Marques distribuées — clique sur une marque pour voir Optique/Solaire/Clips">
+        <div className="space-y-2">
           {BRANDS.map((b) => (
-            <button
-              type="button"
-              key={b}
-              onClick={() => toggleBrand(b)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
-                form.brands.includes(b)
-                  ? "border-transparent text-white"
-                  : "border-stone-200 text-stone-500 bg-white"
-              }`}
-              style={form.brands.includes(b) ? { background: BRAND_COLORS[b].main } : {}}
-            >
-              {b}
-            </button>
+            <div key={b}>
+              <button
+                type="button"
+                onClick={() => toggleBrand(b)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                  form.brands.includes(b)
+                    ? "border-transparent text-white"
+                    : "border-stone-200 text-stone-500 bg-white"
+                }`}
+                style={form.brands.includes(b) ? { background: BRAND_COLORS[b].main } : {}}
+              >
+                {b}
+              </button>
+              {form.brands.includes(b) && (
+                <div className="flex gap-1.5 mt-1.5 ml-1">
+                  {PRODUCT_TYPES.map((type) => {
+                    const active = (form.brandTypes?.[b] || []).includes(type);
+                    return (
+                      <button
+                        type="button"
+                        key={type}
+                        onClick={() => toggleBrandType(b, type)}
+                        className={`px-2.5 py-1 rounded-md text-xs border transition ${
+                          active ? "bg-stone-800 text-white border-transparent" : "border-stone-200 text-stone-500 bg-white"
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           ))}
         </div>
       </Field>
@@ -1614,6 +1668,18 @@ function ClientForm({ initial, onSave, onCancel }) {
           <option value="10">10%</option>
         </select>
       </Field>
+      {initial && (
+        <div className="bg-stone-50 rounded-xl p-3 mb-3 text-sm">
+          <div className="flex justify-between mb-1">
+            <span className="text-stone-500">Total dépensé (historique)</span>
+            <span className="font-semibold text-stone-800">{fmtMAD(form.totalSpent || 0)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-stone-500">Cagnotte calculée ({form.cashbackRate}%)</span>
+            <span className="font-semibold text-emerald-700">{fmtMAD(cashbackPreview)}</span>
+          </div>
+        </div>
+      )}
       <div className="flex justify-end gap-2 mt-4">
         <Button variant="secondary" onClick={onCancel}>Annuler</Button>
         <Button type="submit">Enregistrer</Button>
@@ -2048,6 +2114,7 @@ function StockModule({ data, setData }) {
   const totalValue = useMemo(() => data.stock.reduce((s, x) => s + x.quantity * x.costPrice, 0), [data.stock]);
 
   const boxStock = data.boxStock || [];
+  const typeStock = data.typeStock || [];
 
   const adjustBoxStock = (brand, delta) => {
     setData((d) => {
@@ -2064,6 +2131,24 @@ function StockModule({ data, setData }) {
       return {
         ...d,
         boxStock: [...(d.boxStock || []), { id: uid(), brand, quantity: Math.max(0, delta), minQuantity: 30 }],
+      };
+    });
+  };
+
+  const adjustTypeStock = (brand, type, delta) => {
+    setData((d) => {
+      const existing = (d.typeStock || []).find((t) => t.brand === brand && t.type === type);
+      if (existing) {
+        return {
+          ...d,
+          typeStock: d.typeStock.map((t) =>
+            t.brand === brand && t.type === type ? { ...t, quantity: Math.max(0, t.quantity + delta) } : t
+          ),
+        };
+      }
+      return {
+        ...d,
+        typeStock: [...(d.typeStock || []), { id: uid(), brand, type, quantity: Math.max(0, delta), minQuantity: 15 }],
       };
     });
   };
@@ -2118,6 +2203,35 @@ function StockModule({ data, setData }) {
               </div>
             );
           })}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-stone-200 p-4 mb-6">
+        <p className="text-sm font-medium text-stone-700 mb-3">Stock par marque et type (Optique / Solaire / Clips)</p>
+        <div className="grid sm:grid-cols-3 gap-4">
+          {BRANDS.map((brand) => (
+            <div key={brand} className="rounded-xl border border-stone-200 p-3.5">
+              <Badge color={BRAND_COLORS[brand]?.text} bg={BRAND_COLORS[brand]?.light}>{brand}</Badge>
+              <div className="mt-3 space-y-2.5">
+                {["Optique", "Solaire", "Clips"].map((type) => {
+                  const t = typeStock.find((x) => x.brand === brand && x.type === type) || { quantity: 0, minQuantity: 15 };
+                  const low = t.quantity <= t.minQuantity;
+                  return (
+                    <div key={type} className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-stone-500">{type}</p>
+                        <p className={`text-sm font-semibold ${low ? "text-rose-600" : "text-stone-800"}`}>{fmtNum(t.quantity)}</p>
+                      </div>
+                      <div className="flex gap-1">
+                        <button onClick={() => adjustTypeStock(brand, type, -1)} className="w-6 h-6 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-medium">−</button>
+                        <button onClick={() => adjustTypeStock(brand, type, 1)} className="w-6 h-6 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-medium">+</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
