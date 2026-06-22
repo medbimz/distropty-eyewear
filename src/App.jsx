@@ -163,25 +163,24 @@ function buildDemoData() {
     VEROKA: ["Falcon", "Granite", "Horizon", "Ionis", "Jasper"],
     CRILLON: ["Kyoto", "Liberty", "Monaco", "Nova", "Opale"],
   };
-  const colors = ["Noir", "Havane", "Doré", "Argenté", "Bordeaux", "Bleu marine"];
+  const productTypes = ["Optique", "Solaire", "Clips"];
   let stock = [];
   BRANDS.forEach((brand) => {
     models[brand].forEach((model, mi) => {
-      colors.slice(0, 3 + (mi % 3)).forEach((color, ci) => {
-        const sku = `${brand.slice(0, 3).toUpperCase()}-${String(mi + 1).padStart(2, "0")}${ci}-${color.slice(0, 3).toUpperCase()}`;
-        const cost = randInt(180, 450);
-        stock.push({
-          id: uid(),
-          sku,
-          brand,
-          model,
-          color,
-          quantity: randInt(0, 60),
-          minQuantity: randInt(8, 15),
-          costPrice: cost,
-          sellPrice: Math.round(cost * (1.6 + Math.random() * 0.7)),
-          city: pick(CITIES.slice(0, 6)),
-        });
+      const type = productTypes[mi % productTypes.length];
+      const sku = `${brand.slice(0, 3).toUpperCase()}-${String(mi + 1).padStart(2, "0")}-${type.slice(0, 3).toUpperCase()}`;
+      const cost = randInt(180, 450);
+      stock.push({
+        id: uid(),
+        sku,
+        brand,
+        model,
+        type,
+        quantity: randInt(0, 60),
+        minQuantity: randInt(8, 15),
+        costPrice: cost,
+        sellPrice: Math.round(cost * (1.6 + Math.random() * 0.7)),
+        city: pick(CITIES.slice(0, 6)),
       });
     });
   });
@@ -200,6 +199,7 @@ function buildDemoData() {
       clientId: client.id,
       employeeId: rep.id,
       brand: item.brand,
+      type: item.type,
       stockId: item.id,
       sku: item.sku,
       quantity: qty,
@@ -344,16 +344,16 @@ function clientToRow(c) {
   return { id: c.id, contact_name: c.contactName, shop_name: c.shopName, phone: c.phone, email: c.email, city: c.city, brands: c.brands, points: c.points, total_spent: c.totalSpent, join_date: c.joinDate, last_visit: c.lastVisit, cashback_rate: c.cashbackRate || 0, cashback_balance: c.cashbackBalance || 0, brand_types: c.brandTypes || {} };
 }
 function rowToStock(r) {
-  return { id: r.id, sku: r.sku, brand: r.brand, model: r.model, color: r.color, quantity: r.quantity, minQuantity: r.min_quantity, costPrice: r.cost_price, sellPrice: r.sell_price, city: r.city };
+  return { id: r.id, sku: r.sku, brand: r.brand, model: r.model, type: r.type, quantity: r.quantity, minQuantity: r.min_quantity, costPrice: r.cost_price, sellPrice: r.sell_price, city: r.city };
 }
 function stockToRow(s) {
-  return { id: s.id, sku: s.sku, brand: s.brand, model: s.model, color: s.color, quantity: s.quantity, min_quantity: s.minQuantity, cost_price: s.costPrice, sell_price: s.sellPrice, city: s.city };
+  return { id: s.id, sku: s.sku, brand: s.brand, model: s.model, type: s.type, quantity: s.quantity, min_quantity: s.minQuantity, cost_price: s.costPrice, sell_price: s.sellPrice, city: s.city };
 }
 function rowToSale(r) {
-  return { id: r.id, date: r.date, clientId: r.client_id, employeeId: r.employee_id, brand: r.brand, stockId: r.stock_id, sku: r.sku, quantity: r.quantity, unitPrice: r.unit_price, total: r.total, city: r.city };
+  return { id: r.id, date: r.date, clientId: r.client_id, employeeId: r.employee_id, brand: r.brand, type: r.type, stockId: r.stock_id, sku: r.sku, quantity: r.quantity, unitPrice: r.unit_price, total: r.total, city: r.city };
 }
 function saleToRow(s) {
-  return { id: s.id, date: s.date, client_id: s.clientId, employee_id: s.employeeId, brand: s.brand, stock_id: s.stockId, sku: s.sku, quantity: s.quantity, unit_price: s.unitPrice, total: s.total, city: s.city };
+  return { id: s.id, date: s.date, client_id: s.clientId, employee_id: s.employeeId, brand: s.brand, type: s.type, stock_id: s.stockId, sku: s.sku, quantity: s.quantity, unit_price: s.unitPrice, total: s.total, city: s.city };
 }
 function rowToExpense(r) {
   return { id: r.id, date: r.date, category: r.category, description: r.description, amount: r.amount, employeeId: r.employee_id, city: r.city, brand: r.brand, liters: r.liters };
@@ -2066,7 +2066,7 @@ function OffersModule({ data, setData }) {
 function StockForm({ initial, onSave, onCancel }) {
   const [form, setForm] = useState(
     initial || {
-      sku: "", brand: BRANDS[0], model: "", color: "", quantity: "",
+      sku: "", brand: BRANDS[0], model: "", type: "Optique", quantity: "",
       minQuantity: "", costPrice: "", sellPrice: "", city: CITIES[0],
     }
   );
@@ -2095,7 +2095,13 @@ function StockForm({ initial, onSave, onCancel }) {
       </div>
       <div className="grid grid-cols-2 gap-x-3">
         <Field label="Modèle"><input className={inputCls} value={form.model} onChange={(e) => set("model", e.target.value)} required /></Field>
-        <Field label="Couleur"><input className={inputCls} value={form.color} onChange={(e) => set("color", e.target.value)} required /></Field>
+        <Field label="Type">
+          <select className={selectCls} value={form.type} onChange={(e) => set("type", e.target.value)}>
+            <option>Optique</option>
+            <option>Solaire</option>
+            <option>Clips</option>
+          </select>
+        </Field>
       </div>
       <div className="grid grid-cols-2 gap-x-3">
         <Field label="Quantité en stock"><input type="number" className={inputCls} value={form.quantity} onChange={(e) => set("quantity", e.target.value)} required /></Field>
@@ -2171,7 +2177,7 @@ function StockModule({ data, setData }) {
       const matchesBrand = brandFilter === "Toutes" || s.brand === brandFilter;
       const matchesCity = cityFilter === "Toutes" || s.city === cityFilter;
       const q = search.toLowerCase();
-      const matchesSearch = !q || `${s.sku} ${s.model} ${s.color}`.toLowerCase().includes(q);
+      const matchesSearch = !q || `${s.sku} ${s.model} ${s.type}`.toLowerCase().includes(q);
       return matchesBrand && matchesCity && matchesSearch;
     });
   }, [data.stock, search, brandFilter, cityFilter]);
@@ -2261,7 +2267,7 @@ function StockModule({ data, setData }) {
       )}
 
       <div className="flex flex-wrap gap-2.5 mb-4">
-        <SearchInput value={search} onChange={setSearch} placeholder="SKU, modèle, couleur..." />
+        <SearchInput value={search} onChange={setSearch} placeholder="SKU, modèle, type..." />
         <select className={selectCls + " w-auto"} value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)}>
           <option>Toutes</option>
           {BRANDS.map((b) => <option key={b}>{b}</option>)}
@@ -2281,7 +2287,7 @@ function StockModule({ data, setData }) {
               <tr>
                 <th className="text-left px-4 py-2.5 font-medium">SKU</th>
                 <th className="text-left px-4 py-2.5 font-medium">Marque</th>
-                <th className="text-left px-4 py-2.5 font-medium">Modèle / Couleur</th>
+                <th className="text-left px-4 py-2.5 font-medium">Modèle / Type</th>
                 <th className="text-left px-4 py-2.5 font-medium">Ville</th>
                 <th className="text-right px-4 py-2.5 font-medium">Qté</th>
                 <th className="text-right px-4 py-2.5 font-medium">Prix vente</th>
@@ -2299,7 +2305,7 @@ function StockModule({ data, setData }) {
                     <td className="px-4 py-2.5">
                       <Badge color={BRAND_COLORS[s.brand]?.text} bg={BRAND_COLORS[s.brand]?.light}>{s.brand}</Badge>
                     </td>
-                    <td className="px-4 py-2.5 text-stone-700">{s.model} <span className="text-stone-400">· {s.color}</span></td>
+                    <td className="px-4 py-2.5 text-stone-700">{s.model} <span className="text-stone-400">· {s.type}</span></td>
                     <td className="px-4 py-2.5 text-stone-600">{s.city}</td>
                     <td className="px-4 py-2.5 text-right">
                       <span className={low ? "text-rose-600 font-semibold" : "text-stone-700"}>{s.quantity}</span>
@@ -2353,6 +2359,7 @@ function SaleForm({ clients, employees, stock, onSave, onCancel }) {
           clientId: form.clientId,
           employeeId: form.employeeId,
           brand: selectedItem.brand,
+          type: selectedItem.type,
           stockId: selectedItem.id,
           sku: selectedItem.sku,
           quantity: Number(form.quantity) || 1,
@@ -2376,7 +2383,7 @@ function SaleForm({ clients, employees, stock, onSave, onCancel }) {
       <Field label="Article (SKU)">
         <select className={selectCls} value={form.stockId} onChange={(e) => set("stockId", e.target.value)}>
           {stock.map((s) => (
-            <option key={s.id} value={s.id}>{s.sku} — {s.model} {s.color} ({fmtMAD(s.sellPrice)})</option>
+            <option key={s.id} value={s.id}>{s.sku} — {s.model} ({s.type}) ({fmtMAD(s.sellPrice)})</option>
           ))}
         </select>
       </Field>
@@ -2419,6 +2426,9 @@ function SalesModule({ data, setData }) {
       boxStock: (d.boxStock || []).some((b) => b.brand === sale.brand)
         ? d.boxStock.map((b) => (b.brand === sale.brand ? { ...b, quantity: Math.max(0, b.quantity - sale.quantity) } : b))
         : [...(d.boxStock || []), { id: uid(), brand: sale.brand, quantity: 0, minQuantity: 30 }],
+      typeStock: (d.typeStock || []).some((t) => t.brand === sale.brand && t.type === sale.type)
+        ? d.typeStock.map((t) => (t.brand === sale.brand && t.type === sale.type ? { ...t, quantity: Math.max(0, t.quantity - sale.quantity) } : t))
+        : [...(d.typeStock || []), { id: uid(), brand: sale.brand, type: sale.type, quantity: 0, minQuantity: 15 }],
     }));
     setModal(null);
   };
