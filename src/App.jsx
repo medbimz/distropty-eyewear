@@ -299,7 +299,15 @@ function buildDemoData() {
   }
   cheques.sort((a, b) => new Date(b.issueDate) - new Date(a.issueDate));
 
-  return { employees, clients, stock, sales, expenses, fuelLogs, offers, cheques };
+  // ---------- Stock de boîtes (emballages) par marque ----------
+  const boxStock = BRANDS.map((brand) => ({
+    id: uid(),
+    brand,
+    quantity: randInt(50, 300),
+    minQuantity: 30,
+  }));
+
+  return { employees, clients, stock, sales, expenses, fuelLogs, offers, cheques, boxStock };
 }
 
 
@@ -357,8 +365,14 @@ function rowToCheque(r) {
 function chequeToRow(c) {
   return { id: c.id, direction: c.direction, number: c.number, bank: c.bank, amount: c.amount, issue_date: c.issueDate, due_date: c.dueDate, status: c.status, client_id: c.clientId, payee: c.payee, note: c.note };
 }
+function rowToBoxStock(r) {
+  return { id: r.id, brand: r.brand, quantity: r.quantity, minQuantity: r.min_quantity };
+}
+function boxStockToRow(b) {
+  return { id: b.id, brand: b.brand, quantity: b.quantity, min_quantity: b.minQuantity };
+}
 
-const EMPTY_DATA = { employees: [], clients: [], stock: [], sales: [], expenses: [], fuelLogs: [], offers: [], cheques: [] };
+const EMPTY_DATA = { employees: [], clients: [], stock: [], sales: [], expenses: [], fuelLogs: [], offers: [], cheques: [], boxStock: [] };
 
 function useStore() {
   const [data, setDataState] = useState(EMPTY_DATA);
@@ -369,7 +383,7 @@ function useStore() {
     setLoading(true);
     setError(null);
     try {
-      const [emp, cli, stk, sal, exp, fuel, off, chq] = await Promise.all([
+      const [emp, cli, stk, sal, exp, fuel, off, chq, box] = await Promise.all([
         supabase.from("employees").select("*").order("created_at"),
         supabase.from("clients").select("*").order("created_at"),
         supabase.from("stock").select("*").order("created_at"),
@@ -378,8 +392,9 @@ function useStore() {
         supabase.from("fuel_logs").select("*").order("date", { ascending: false }),
         supabase.from("offers").select("*").order("created_at"),
         supabase.from("cheques").select("*").order("issue_date", { ascending: false }),
+        supabase.from("box_stock").select("*").order("created_at"),
       ]);
-      const firstError = [emp, cli, stk, sal, exp, fuel, off, chq].find((r) => r.error)?.error;
+      const firstError = [emp, cli, stk, sal, exp, fuel, off, chq, box].find((r) => r.error)?.error;
       if (firstError) throw firstError;
       setDataState({
         employees: (emp.data || []).map(rowToEmployee),
@@ -390,6 +405,7 @@ function useStore() {
         fuelLogs: (fuel.data || []).map(rowToFuel),
         offers: (off.data || []).map(rowToOffer),
         cheques: (chq.data || []).map(rowToCheque),
+        boxStock: (box.data || []).map(rowToBoxStock),
       });
     } catch (e) {
       setError(e.message || "Erreur de chargement des données");
@@ -419,6 +435,7 @@ function useStore() {
     fuelLogs: { table: "fuel_logs", toRow: fuelToRow },
     offers: { table: "offers", toRow: offerToRow },
     cheques: { table: "cheques", toRow: chequeToRow },
+    boxStock: { table: "box_stock", toRow: boxStockToRow },
   };
 
   async function syncToSupabase(prev, next) {
@@ -821,7 +838,7 @@ function EmployeeForm({ initial, onSave, onCancel }) {
   const [form, setForm] = useState(
     initial || {
       firstName: "", lastName: "", role: "Commercial", phone: "", email: "",
-      city: CITIES[0], baseSalary: "", hireDate: todayISO(), active: true,
+      city: CITIES[0], baseSalary: "", hireDate: todayISO(), active: true, commissionRate: 0,
     }
   );
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -830,7 +847,7 @@ function EmployeeForm({ initial, onSave, onCancel }) {
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        onSave({ ...form, baseSalary: Number(form.baseSalary) || 0 });
+        onSave({ ...form, baseSalary: Number(form.baseSalary) || 0, commissionRate: Number(form.commissionRate) || 0 });
       }}
     >
       <div className="grid grid-cols-2 gap-x-3">
@@ -863,6 +880,16 @@ function EmployeeForm({ initial, onSave, onCancel }) {
           </select>
         </Field>
       </div>
+      <Field label="Commission sur le CA généré (%)">
+        <select className={selectCls} value={form.commissionRate} onChange={(e) => set("commissionRate", e.target.value)}>
+          <option value="0">Aucune commission</option>
+          <option value="3">3%</option>
+          <option value="4">4%</option>
+          <option value="5">5%</option>
+          <option value="6">6%</option>
+          <option value="7">7%</option>
+        </select>
+      </Field>
       <div className="flex justify-end gap-2 mt-4">
         <Button variant="secondary" onClick={onCancel}>Annuler</Button>
         <Button type="submit">Enregistrer</Button>
@@ -937,6 +964,7 @@ function EmployeesModule({ data, setData }) {
                 <th className="text-left px-4 py-2.5 font-medium">Ville</th>
                 <th className="text-right px-4 py-2.5 font-medium">Ventes</th>
                 <th className="text-right px-4 py-2.5 font-medium">CA généré</th>
+                <th className="text-right px-4 py-2.5 font-medium">Commission</th>
                 <th className="text-center px-4 py-2.5 font-medium">Statut</th>
                 <th className="px-4 py-2.5"></th>
               </tr>
@@ -944,6 +972,7 @@ function EmployeesModule({ data, setData }) {
             <tbody>
               {filtered.map((e) => {
                 const s = stats[e.id] || { revenue: 0, count: 0 };
+                const commissionAmount = s.revenue * ((e.commissionRate || 0) / 100);
                 return (
                   <tr key={e.id} className="border-t border-stone-100 hover:bg-stone-50">
                     <td className="px-4 py-2.5">
@@ -954,6 +983,16 @@ function EmployeesModule({ data, setData }) {
                     <td className="px-4 py-2.5 text-stone-600">{e.city}</td>
                     <td className="px-4 py-2.5 text-right text-stone-600">{s.count}</td>
                     <td className="px-4 py-2.5 text-right font-medium text-stone-800">{fmtMAD(s.revenue)}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      {e.commissionRate > 0 ? (
+                        <div>
+                          <Badge color="#6B4E9E" bg="#EFE9F7">{e.commissionRate}%</Badge>
+                          <p className="text-xs text-stone-500 mt-0.5">{fmtMAD(commissionAmount)}</p>
+                        </div>
+                      ) : (
+                        <span className="text-stone-400 text-xs">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5 text-center">
                       {e.active ? <Badge color="#15803d" bg="#ecfdf5">Actif</Badge> : <Badge color="#78716c" bg="#f5f5f4">Inactif</Badge>}
                     </td>
@@ -1053,15 +1092,17 @@ function ExpenseForm({ initial, employees, onSave, onCancel }) {
 function ExpensesModule({ data, setData }) {
   const [catFilter, setCatFilter] = useState("Toutes");
   const [monthFilter, setMonthFilter] = useState("Tous");
+  const [employeeFilter, setEmployeeFilter] = useState("Tous");
   const [modal, setModal] = useState(null);
 
   const filtered = useMemo(() => {
     return data.expenses.filter((e) => {
       const matchesCat = catFilter === "Toutes" || e.category === catFilter;
       const matchesMonth = monthFilter === "Tous" || new Date(e.date).getMonth() === Number(monthFilter);
-      return matchesCat && matchesMonth;
+      const matchesEmployee = employeeFilter === "Tous" || e.employeeId === employeeFilter;
+      return matchesCat && matchesMonth && matchesEmployee;
     }).sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [data.expenses, catFilter, monthFilter]);
+  }, [data.expenses, catFilter, monthFilter, employeeFilter]);
 
   const totalAll = useMemo(() => data.expenses.reduce((s, e) => s + e.amount, 0), [data.expenses]);
   const totalFuel = useMemo(() => data.expenses.filter((e) => e.category === "Carburant").reduce((s, e) => s + e.amount, 0), [data.expenses]);
@@ -1087,12 +1128,35 @@ function ExpensesModule({ data, setData }) {
     return arr;
   }, [data.expenses]);
 
+  // Statistiques mensuelles pour l'employé sélectionné (sur les 6 derniers mois)
+  const employeeMonthlyStats = useMemo(() => {
+    if (employeeFilter === "Tous") return null;
+    const arr = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const m = d.getMonth(), y = d.getFullYear();
+      const monthExpenses = data.expenses.filter((e) => {
+        const ed = new Date(e.date);
+        return ed.getMonth() === m && ed.getFullYear() === y && e.employeeId === employeeFilter;
+      });
+      arr.push({
+        mois: MONTHS[m].slice(0, 3),
+        total: monthExpenses.reduce((s, e) => s + e.amount, 0),
+        nombre: monthExpenses.length,
+      });
+    }
+    return arr;
+  }, [data.expenses, employeeFilter]);
+
+  const selectedEmployee = data.employees.find((e) => e.id === employeeFilter);
+
   const byCategory = useMemo(() => {
     return EXPENSE_CATEGORIES.map((cat) => ({
       name: cat,
-      value: data.expenses.filter((e) => e.category === cat).reduce((s, e) => s + e.amount, 0),
+      value: data.expenses.filter((e) => e.category === cat && (employeeFilter === "Tous" || e.employeeId === employeeFilter)).reduce((s, e) => s + e.amount, 0),
     })).filter((c) => c.value > 0);
-  }, [data.expenses]);
+  }, [data.expenses, employeeFilter]);
 
   const saveExpense = (exp) => {
     setData((d) => {
@@ -1160,7 +1224,30 @@ function ExpensesModule({ data, setData }) {
           <option value="Tous">Tous les mois</option>
           {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
         </select>
+        <select className={selectCls + " w-auto"} value={employeeFilter} onChange={(e) => setEmployeeFilter(e.target.value)}>
+          <option value="Tous">Tous les employés</option>
+          {data.employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+        </select>
       </div>
+
+      {employeeMonthlyStats && (
+        <div className="bg-white rounded-2xl border border-stone-200 p-4 mb-6">
+          <p className="text-sm font-medium text-stone-700 mb-3">
+            Statistiques mensuelles — {selectedEmployee?.firstName} {selectedEmployee?.lastName}
+          </p>
+          <div style={{ width: "100%", height: 220 }}>
+            <ResponsiveContainer>
+              <BarChart data={employeeMonthlyStats}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0eee9" />
+                <XAxis dataKey="mois" tick={{ fontSize: 11, fill: "#78716c" }} />
+                <YAxis tick={{ fontSize: 11, fill: "#78716c" }} tickFormatter={(v) => `${v / 1000}k`} />
+                <Tooltip formatter={(v) => fmtMAD(v)} />
+                <Bar dataKey="total" fill="#6B4E9E" name="Dépenses" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <EmptyState icon={Wallet} text="Aucune dépense ne correspond à ces critères." />
@@ -1269,9 +1356,20 @@ function FuelForm({ initial, employees, onSave, onCancel }) {
 
 function FuelModule({ data, setData }) {
   const [modal, setModal] = useState(null);
+  const [vehicleFilter, setVehicleFilter] = useState("Tous");
 
-  const totalCost = useMemo(() => data.fuelLogs.reduce((s, f) => s + f.total, 0), [data.fuelLogs]);
-  const totalLiters = useMemo(() => data.fuelLogs.reduce((s, f) => s + f.liters, 0), [data.fuelLogs]);
+  const vehicles = useMemo(() => {
+    const set = new Set(data.fuelLogs.map((f) => f.vehicle).filter(Boolean));
+    return Array.from(set).sort();
+  }, [data.fuelLogs]);
+
+  const filteredLogs = useMemo(() => {
+    if (vehicleFilter === "Tous") return data.fuelLogs;
+    return data.fuelLogs.filter((f) => f.vehicle === vehicleFilter);
+  }, [data.fuelLogs, vehicleFilter]);
+
+  const totalCost = useMemo(() => filteredLogs.reduce((s, f) => s + f.total, 0), [filteredLogs]);
+  const totalLiters = useMemo(() => filteredLogs.reduce((s, f) => s + f.liters, 0), [filteredLogs]);
   const avgPrice = totalLiters > 0 ? totalCost / totalLiters : 0;
 
   const monthlyTrend = useMemo(() => {
@@ -1280,24 +1378,46 @@ function FuelModule({ data, setData }) {
       const d = new Date();
       d.setMonth(d.getMonth() - i);
       const m = d.getMonth(), y = d.getFullYear();
-      const total = data.fuelLogs.filter((f) => {
+      const total = filteredLogs.filter((f) => {
         const fd = new Date(f.date);
         return fd.getMonth() === m && fd.getFullYear() === y;
       }).reduce((s, f) => s + f.total, 0);
       arr.push({ mois: MONTHS[m].slice(0, 3), total });
     }
     return arr;
-  }, [data.fuelLogs]);
+  }, [filteredLogs]);
+
+  // Statistiques mensuelles détaillées pour le véhicule sélectionné
+  const vehicleMonthlyStats = useMemo(() => {
+    if (vehicleFilter === "Tous") return null;
+    const arr = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const m = d.getMonth(), y = d.getFullYear();
+      const monthLogs = filteredLogs.filter((f) => {
+        const fd = new Date(f.date);
+        return fd.getMonth() === m && fd.getFullYear() === y;
+      });
+      arr.push({
+        mois: MONTHS[m].slice(0, 3),
+        total: monthLogs.reduce((s, f) => s + f.total, 0),
+        liters: monthLogs.reduce((s, f) => s + f.liters, 0),
+        pleins: monthLogs.length,
+      });
+    }
+    return arr;
+  }, [filteredLogs, vehicleFilter]);
 
   const byDriver = useMemo(() => {
     const map = {};
-    data.fuelLogs.forEach((f) => {
+    filteredLogs.forEach((f) => {
       const emp = data.employees.find((e) => e.id === f.employeeId);
       const name = emp ? `${emp.firstName} ${emp.lastName}` : "Inconnu";
       map[name] = (map[name] || 0) + f.total;
     });
     return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-  }, [data.fuelLogs, data.employees]);
+  }, [filteredLogs, data.employees]);
 
   const drivers = data.employees.filter((e) => e.role === "Chauffeur");
 
@@ -1310,7 +1430,7 @@ function FuelModule({ data, setData }) {
   };
   const deleteFuel = (id) => setData((d) => ({ ...d, fuelLogs: d.fuelLogs.filter((f) => f.id !== id) }));
 
-  const sortedLogs = [...data.fuelLogs].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const sortedLogs = [...filteredLogs].sort((a, b) => new Date(b.date) - new Date(a.date));
 
   return (
     <div>
@@ -1320,11 +1440,35 @@ function FuelModule({ data, setData }) {
         action={<Button icon={Plus} onClick={() => setModal("new")}>Nouveau plein</Button>}
       />
 
+      <div className="flex flex-wrap gap-2.5 mb-5">
+        <select className={selectCls + " w-auto"} value={vehicleFilter} onChange={(e) => setVehicleFilter(e.target.value)}>
+          <option value="Tous">Tous les véhicules</option>
+          {vehicles.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
         <StatCard label="Coût total carburant" value={fmtMAD(totalCost)} icon={Fuel} accent="#C8862E" />
         <StatCard label="Litres consommés" value={`${fmtNum(totalLiters)} L`} icon={Fuel} accent="#6B4E9E" />
         <StatCard label="Prix moyen / litre" value={`${avgPrice.toFixed(2)} MAD`} icon={Landmark} accent="#4A6E8C" />
       </div>
+
+      {vehicleMonthlyStats && (
+        <div className="bg-white rounded-2xl border border-stone-200 p-4 mb-6">
+          <p className="text-sm font-medium text-stone-700 mb-3">Statistiques mensuelles — {vehicleFilter}</p>
+          <div style={{ width: "100%", height: 220 }}>
+            <ResponsiveContainer>
+              <BarChart data={vehicleMonthlyStats}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0eee9" />
+                <XAxis dataKey="mois" tick={{ fontSize: 11, fill: "#78716c" }} />
+                <YAxis tick={{ fontSize: 11, fill: "#78716c" }} tickFormatter={(v) => `${v / 1000}k`} />
+                <Tooltip formatter={(v, name) => name === "total" ? fmtMAD(v) : `${v} L`} />
+                <Bar dataKey="total" fill="#C8862E" name="Coût" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-4 mb-6">
         <div className="bg-white rounded-2xl border border-stone-200 p-4">
@@ -1418,6 +1562,7 @@ function ClientForm({ initial, onSave, onCancel }) {
     initial || {
       contactName: "", shopName: "", phone: "", email: "", city: CITIES[0],
       brands: [], totalSpent: 0, points: 0, joinDate: todayISO(), lastVisit: todayISO(),
+      cashbackRate: 0, cashbackBalance: 0,
     }
   );
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -1429,7 +1574,7 @@ function ClientForm({ initial, onSave, onCancel }) {
   };
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); onSave(form); }}>
+    <form onSubmit={(e) => { e.preventDefault(); onSave({ ...form, cashbackRate: Number(form.cashbackRate) || 0 }); }}>
       <div className="grid grid-cols-2 gap-x-3">
         <Field label="Nom du contact"><input className={inputCls} value={form.contactName} onChange={(e) => set("contactName", e.target.value)} required /></Field>
         <Field label="Nom de la boutique"><input className={inputCls} value={form.shopName} onChange={(e) => set("shopName", e.target.value)} required /></Field>
@@ -1462,6 +1607,13 @@ function ClientForm({ initial, onSave, onCancel }) {
           ))}
         </div>
       </Field>
+      <Field label="Taux de cagnotte sur achats (%)">
+        <select className={selectCls} value={form.cashbackRate} onChange={(e) => set("cashbackRate", e.target.value)}>
+          <option value="0">Aucune cagnotte</option>
+          <option value="5">5%</option>
+          <option value="10">10%</option>
+        </select>
+      </Field>
       <div className="flex justify-end gap-2 mt-4">
         <Button variant="secondary" onClick={onCancel}>Annuler</Button>
         <Button type="submit">Enregistrer</Button>
@@ -1473,6 +1625,7 @@ function ClientForm({ initial, onSave, onCancel }) {
 function AwardPointsModal({ client, onSave, onCancel }) {
   const [amount, setAmount] = useState("");
   const pointsToAdd = Math.floor((Number(amount) || 0) / 100);
+  const cashbackEarned = (Number(amount) || 0) * ((client.cashbackRate || 0) / 100);
   return (
     <form
       onSubmit={(e) => {
@@ -1481,15 +1634,48 @@ function AwardPointsModal({ client, onSave, onCancel }) {
       }}
     >
       <p className="text-sm text-stone-500 mb-3">
-        Attribuer des points à <strong className="text-stone-800">{client.shopName}</strong> selon le montant dépensé (1 point par tranche de 100 MAD).
+        Attribuer des points à <strong className="text-stone-800">{client.shopName}</strong> selon le montant dépensé (1 point par tranche de 100 MAD{client.cashbackRate > 0 ? `, + ${client.cashbackRate}% en cagnotte` : ""}).
       </p>
       <Field label="Montant de l'achat (MAD)">
         <input type="number" className={inputCls} value={amount} onChange={(e) => setAmount(e.target.value)} required autoFocus />
       </Field>
-      <p className="text-sm text-stone-500 mb-3">Points à attribuer : <span className="font-semibold text-stone-800">{pointsToAdd}</span></p>
+      <p className="text-sm text-stone-500 mb-1">Points à attribuer : <span className="font-semibold text-stone-800">{pointsToAdd}</span></p>
+      {client.cashbackRate > 0 && (
+        <p className="text-sm text-stone-500 mb-3">Cagnotte gagnée ({client.cashbackRate}%) : <span className="font-semibold text-emerald-700">{fmtMAD(cashbackEarned)}</span></p>
+      )}
       <div className="flex justify-end gap-2 mt-2">
         <Button variant="secondary" onClick={onCancel}>Annuler</Button>
         <Button type="submit">Attribuer</Button>
+      </div>
+    </form>
+  );
+}
+
+function UseCashbackModal({ client, onSave, onCancel }) {
+  const [amount, setAmount] = useState("");
+  const balance = client.cashbackBalance || 0;
+  const amountNum = Number(amount) || 0;
+  const exceedsBalance = amountNum > balance;
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (exceedsBalance || amountNum <= 0) return;
+        onSave(amountNum);
+      }}
+    >
+      <p className="text-sm text-stone-500 mb-3">
+        Solde de cagnotte disponible pour <strong className="text-stone-800">{client.shopName}</strong> : <span className="font-semibold text-emerald-700">{fmtMAD(balance)}</span>
+      </p>
+      <Field label="Montant de cagnotte à utiliser (MAD)">
+        <input type="number" className={inputCls} value={amount} onChange={(e) => setAmount(e.target.value)} required autoFocus />
+      </Field>
+      {exceedsBalance && <p className="text-sm text-rose-600 mb-3">Le montant dépasse le solde disponible.</p>}
+      <p className="text-xs text-stone-400 mb-3">À déduire toi-même du montant payé par le client sur sa prochaine facture.</p>
+      <div className="flex justify-end gap-2 mt-2">
+        <Button variant="secondary" onClick={onCancel}>Annuler</Button>
+        <Button type="submit">Déduire de la cagnotte</Button>
       </div>
     </form>
   );
@@ -1501,6 +1687,7 @@ function ClientsModule({ data, setData }) {
   const [cityFilter, setCityFilter] = useState("Toutes");
   const [modal, setModal] = useState(null);
   const [awardModal, setAwardModal] = useState(null);
+  const [cashbackModal, setCashbackModal] = useState(null);
 
   const filtered = useMemo(() => {
     return data.clients.filter((c) => {
@@ -1526,13 +1713,31 @@ function ClientsModule({ data, setData }) {
   const awardPoints = (clientId, pointsToAdd, amount) => {
     setData((d) => ({
       ...d,
+      clients: d.clients.map((c) => {
+        if (c.id !== clientId) return c;
+        const cashbackEarned = amount * ((c.cashbackRate || 0) / 100);
+        return {
+          ...c,
+          points: c.points + pointsToAdd,
+          totalSpent: c.totalSpent + amount,
+          lastVisit: todayISO(),
+          cashbackBalance: (c.cashbackBalance || 0) + cashbackEarned,
+        };
+      }),
+    }));
+    setAwardModal(null);
+  };
+
+  const useCashback = (clientId, amountToUse) => {
+    setData((d) => ({
+      ...d,
       clients: d.clients.map((c) =>
         c.id === clientId
-          ? { ...c, points: c.points + pointsToAdd, totalSpent: c.totalSpent + amount, lastVisit: todayISO() }
+          ? { ...c, cashbackBalance: Math.max(0, (c.cashbackBalance || 0) - amountToUse) }
           : c
       ),
     }));
-    setAwardModal(null);
+    setCashbackModal(null);
   };
 
   return (
@@ -1590,6 +1795,17 @@ function ClientsModule({ data, setData }) {
                     <p className="font-semibold text-stone-800">{fmtMAD(c.totalSpent)}</p>
                   </div>
                 </div>
+                {c.cashbackRate > 0 && (
+                  <div className="flex items-center justify-between text-sm border-t border-stone-100 pt-2.5 mt-2.5">
+                    <div>
+                      <p className="text-xs text-stone-400">Cagnotte ({c.cashbackRate}%)</p>
+                      <p className="font-semibold text-emerald-700">{fmtMAD(c.cashbackBalance || 0)}</p>
+                    </div>
+                    {(c.cashbackBalance || 0) > 0 && (
+                      <Button size="sm" variant="secondary" onClick={() => setCashbackModal(c)}>Utiliser</Button>
+                    )}
+                  </div>
+                )}
                 <div className="flex gap-1.5 mt-3">
                   <Button size="sm" variant="secondary" onClick={() => setAwardModal(c)}>Attribuer points</Button>
                   <button onClick={() => setModal(c)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
@@ -1609,6 +1825,11 @@ function ClientsModule({ data, setData }) {
       {awardModal && (
         <Modal title="Attribuer des points de fidélité" onClose={() => setAwardModal(null)}>
           <AwardPointsModal client={awardModal} onSave={(pts, amt) => awardPoints(awardModal.id, pts, amt)} onCancel={() => setAwardModal(null)} />
+        </Modal>
+      )}
+      {cashbackModal && (
+        <Modal title="Utiliser la cagnotte" onClose={() => setCashbackModal(null)}>
+          <UseCashbackModal client={cashbackModal} onSave={(amt) => useCashback(cashbackModal.id, amt)} onCancel={() => setCashbackModal(null)} />
         </Modal>
       )}
     </div>
@@ -1826,6 +2047,27 @@ function StockModule({ data, setData }) {
   const lowStock = useMemo(() => data.stock.filter((s) => s.quantity <= s.minQuantity), [data.stock]);
   const totalValue = useMemo(() => data.stock.reduce((s, x) => s + x.quantity * x.costPrice, 0), [data.stock]);
 
+  const boxStock = data.boxStock || [];
+
+  const adjustBoxStock = (brand, delta) => {
+    setData((d) => {
+      const existing = (d.boxStock || []).find((b) => b.brand === brand);
+      if (existing) {
+        return {
+          ...d,
+          boxStock: d.boxStock.map((b) =>
+            b.brand === brand ? { ...b, quantity: Math.max(0, b.quantity + delta) } : b
+          ),
+        };
+      }
+      // Si la marque n'existe pas encore dans boxStock, on la crée
+      return {
+        ...d,
+        boxStock: [...(d.boxStock || []), { id: uid(), brand, quantity: Math.max(0, delta), minQuantity: 30 }],
+      };
+    });
+  };
+
   const filtered = useMemo(() => {
     return data.stock.filter((s) => {
       const matchesBrand = brandFilter === "Toutes" || s.brand === brandFilter;
@@ -1852,6 +2094,32 @@ function StockModule({ data, setData }) {
         subtitle={`${data.stock.length} référence(s) — valeur totale ${fmtMAD(totalValue)}`}
         action={<Button icon={Plus} onClick={() => setModal("new")}>Ajouter une référence</Button>}
       />
+
+      <div className="bg-white rounded-2xl border border-stone-200 p-4 mb-6">
+        <p className="text-sm font-medium text-stone-700 mb-3">Stock de boîtes (emballages) par marque</p>
+        <div className="grid sm:grid-cols-3 gap-3">
+          {BRANDS.map((brand) => {
+            const box = boxStock.find((b) => b.brand === brand) || { quantity: 0, minQuantity: 30 };
+            const low = box.quantity <= box.minQuantity;
+            return (
+              <div key={brand} className="rounded-xl border border-stone-200 p-3.5">
+                <div className="flex items-center justify-between mb-2">
+                  <Badge color={BRAND_COLORS[brand]?.text} bg={BRAND_COLORS[brand]?.light}>{brand}</Badge>
+                  {low && <AlertTriangle size={14} className="text-amber-500" />}
+                </div>
+                <p className={`text-2xl font-bold mb-2 ${low ? "text-rose-600" : "text-stone-800"}`}>{fmtNum(box.quantity)}</p>
+                <p className="text-xs text-stone-400 mb-3">boîtes en stock {low && "— stock bas"}</p>
+                <div className="flex gap-1.5">
+                  <button onClick={() => adjustBoxStock(brand, -10)} className="flex-1 px-2 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-medium">−10</button>
+                  <button onClick={() => adjustBoxStock(brand, -1)} className="flex-1 px-2 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-medium">−1</button>
+                  <button onClick={() => adjustBoxStock(brand, 1)} className="flex-1 px-2 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-medium">+1</button>
+                  <button onClick={() => adjustBoxStock(brand, 10)} className="flex-1 px-2 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-medium">+10</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {lowStock.length > 0 && (
         <div className="mb-5 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 flex items-start gap-2.5 text-rose-700 text-sm">
@@ -2007,11 +2275,17 @@ function SalesModule({ data, setData }) {
     setData((d) => ({
       ...d,
       sales: [{ ...sale, id: uid() }, ...d.sales],
-      clients: d.clients.map((c) =>
-        c.id === sale.clientId
-          ? { ...c, totalSpent: c.totalSpent + sale.total, points: c.points + Math.floor(sale.total / 100), lastVisit: sale.date }
-          : c
-      ),
+      clients: d.clients.map((c) => {
+        if (c.id !== sale.clientId) return c;
+        const cashbackEarned = sale.total * ((c.cashbackRate || 0) / 100);
+        return {
+          ...c,
+          totalSpent: c.totalSpent + sale.total,
+          points: c.points + Math.floor(sale.total / 100),
+          lastVisit: sale.date,
+          cashbackBalance: (c.cashbackBalance || 0) + cashbackEarned,
+        };
+      }),
       stock: d.stock.map((s) => (s.id === sale.stockId ? { ...s, quantity: Math.max(0, s.quantity - sale.quantity) } : s)),
     }));
     setModal(null);
@@ -2047,6 +2321,7 @@ function SalesModule({ data, setData }) {
                 <th className="text-left px-4 py-2.5 font-medium">Article</th>
                 <th className="text-right px-4 py-2.5 font-medium">Qté</th>
                 <th className="text-right px-4 py-2.5 font-medium">Total</th>
+                <th className="text-right px-4 py-2.5 font-medium">Commission</th>
                 <th className="px-4 py-2.5"></th>
               </tr>
             </thead>
@@ -2054,6 +2329,8 @@ function SalesModule({ data, setData }) {
               {sortedSales.slice(0, 100).map((s) => {
                 const client = data.clients.find((c) => c.id === s.clientId);
                 const emp = data.employees.find((e) => e.id === s.employeeId);
+                const commissionRate = emp?.commissionRate || 0;
+                const commissionAmount = s.total * (commissionRate / 100);
                 return (
                   <tr key={s.id} className="border-t border-stone-100 hover:bg-stone-50">
                     <td className="px-4 py-2.5 text-stone-600">{fmtDate(s.date)}</td>
@@ -2065,6 +2342,13 @@ function SalesModule({ data, setData }) {
                     </td>
                     <td className="px-4 py-2.5 text-right text-stone-600">{s.quantity}</td>
                     <td className="px-4 py-2.5 text-right font-medium text-stone-800">{fmtMAD(s.total)}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      {commissionRate > 0 ? (
+                        <span className="text-indigo-700 font-medium">{fmtMAD(commissionAmount)}</span>
+                      ) : (
+                        <span className="text-stone-400">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5">
                       <button onClick={() => deleteSale(s.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500 ml-auto block"><Trash2 size={14} /></button>
                     </td>
@@ -2420,15 +2704,21 @@ function FinanceModule({ data }) {
       const exp = exps.reduce((s, x) => s + x.amount, 0);
       const fuel = fuels.reduce((s, x) => s + x.total, 0);
       const profit = rev - exp - fuel;
+      const commissionRate = emp.commissionRate || 0;
+      const commission = rev * (commissionRate / 100);
       return {
         id: emp.id, name: `${emp.firstName} ${emp.lastName}`, city: emp.city,
         sales: sales.length, revenue: rev, expenses: exp, fuel, profit,
         margin: rev > 0 ? (profit / rev) * 100 : 0,
+        commissionRate, commission,
       };
     })
     .filter((e) => e.sales > 0 || e.expenses > 0 || e.fuel > 0)
     .sort((a, b) => b.revenue - a.revenue);
   }, [data, period, year, month]);
+
+  const totalCommissions = useMemo(() => employeePerf.reduce((s, e) => s + e.commission, 0), [employeePerf]);
+
 
   return (
     <div>
@@ -2460,12 +2750,13 @@ function FinanceModule({ data }) {
         </select>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
         <StatCard label="Revenu" value={fmtMAD(revenue)} icon={TrendingUp} accent="#3B8C6E" />
         <StatCard label="Dépenses" value={fmtMAD(expensesTotal)} icon={Wallet} accent="#B23A55" />
         <StatCard label="Carburant" value={fmtMAD(fuelTotal)} icon={Fuel} accent="#C8862E" />
         <StatCard label="Bénéfice net" value={fmtMAD(netProfit)} icon={Landmark} accent="#6B4E9E" />
         <StatCard label="Marge" value={`${margin.toFixed(1)}%`} icon={TrendingUp} accent="#4A6E8C" />
+        <StatCard label="Commissions dues" value={fmtMAD(totalCommissions)} icon={Wallet} accent="#C8862E" />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4 mb-6">
@@ -2518,6 +2809,7 @@ function FinanceModule({ data }) {
                 <th className="text-right px-4 py-2.5 font-medium">Carburant</th>
                 <th className="text-right px-4 py-2.5 font-medium">Profit</th>
                 <th className="text-right px-4 py-2.5 font-medium">Marge</th>
+                <th className="text-right px-4 py-2.5 font-medium">Commission</th>
               </tr>
             </thead>
             <tbody>
@@ -2535,6 +2827,13 @@ function FinanceModule({ data }) {
                   <td className="px-4 py-2.5 text-right font-medium text-stone-800">{fmtMAD(e.profit)}</td>
                   <td className="px-4 py-2.5 text-right font-medium" style={{ color: e.margin >= 0 ? "#15803d" : "#b91c1c" }}>
                     {e.margin.toFixed(1)}%
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    {e.commissionRate > 0 ? (
+                      <span className="font-medium text-indigo-700">{fmtMAD(e.commission)} <span className="text-stone-400 text-xs">({e.commissionRate}%)</span></span>
+                    ) : (
+                      <span className="text-stone-400">—</span>
+                    )}
                   </td>
                 </tr>
               ))}
