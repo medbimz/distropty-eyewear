@@ -2130,39 +2130,38 @@ function StockModule({ data, setData }) {
   const boxStock = data.boxStock || [];
   const typeStock = data.typeStock || [];
 
-  const adjustBoxStock = (brand, delta) => {
+  const setBoxStockValue = (brand, value) => {
     setData((d) => {
       const existing = (d.boxStock || []).find((b) => b.brand === brand);
       if (existing) {
         return {
           ...d,
           boxStock: d.boxStock.map((b) =>
-            b.brand === brand ? { ...b, quantity: Math.max(0, b.quantity + delta) } : b
+            b.brand === brand ? { ...b, quantity: Math.max(0, value) } : b
           ),
         };
       }
-      // Si la marque n'existe pas encore dans boxStock, on la crée
       return {
         ...d,
-        boxStock: [...(d.boxStock || []), { id: uid(), brand, quantity: Math.max(0, delta), minQuantity: 30 }],
+        boxStock: [...(d.boxStock || []), { id: uid(), brand, quantity: Math.max(0, value), minQuantity: 30 }],
       };
     });
   };
 
-  const adjustTypeStock = (brand, type, delta) => {
+  const setTypeStockValue = (brand, type, value) => {
     setData((d) => {
       const existing = (d.typeStock || []).find((t) => t.brand === brand && t.type === type);
       if (existing) {
         return {
           ...d,
           typeStock: d.typeStock.map((t) =>
-            t.brand === brand && t.type === type ? { ...t, quantity: Math.max(0, t.quantity + delta) } : t
+            t.brand === brand && t.type === type ? { ...t, quantity: Math.max(0, value) } : t
           ),
         };
       }
       return {
         ...d,
-        typeStock: [...(d.typeStock || []), { id: uid(), brand, type, quantity: Math.max(0, delta), minQuantity: 15 }],
+        typeStock: [...(d.typeStock || []), { id: uid(), brand, type, quantity: Math.max(0, value), minQuantity: 15 }],
       };
     });
   };
@@ -2206,14 +2205,15 @@ function StockModule({ data, setData }) {
                   <Badge color={BRAND_COLORS[brand]?.text} bg={BRAND_COLORS[brand]?.light}>{brand}</Badge>
                   {low && <AlertTriangle size={14} className="text-amber-500" />}
                 </div>
-                <p className={`text-2xl font-bold mb-2 ${low ? "text-rose-600" : "text-stone-800"}`}>{fmtNum(box.quantity)}</p>
-                <p className="text-xs text-stone-400 mb-3">boîtes en stock {low && "— stock bas"}</p>
-                <div className="flex gap-1.5">
-                  <button onClick={() => adjustBoxStock(brand, -10)} className="flex-1 px-2 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-medium">−10</button>
-                  <button onClick={() => adjustBoxStock(brand, -1)} className="flex-1 px-2 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-medium">−1</button>
-                  <button onClick={() => adjustBoxStock(brand, 1)} className="flex-1 px-2 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-medium">+1</button>
-                  <button onClick={() => adjustBoxStock(brand, 10)} className="flex-1 px-2 py-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm font-medium">+10</button>
-                </div>
+                <input
+                  key={box.quantity}
+                  type="number"
+                  defaultValue={box.quantity}
+                  onBlur={(e) => setBoxStockValue(brand, Number(e.target.value) || 0)}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                  className={`w-full text-2xl font-bold mb-1 px-2 py-1 rounded-lg border border-stone-200 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 ${low ? "text-rose-600" : "text-stone-800"}`}
+                />
+                <p className="text-xs text-stone-400">boîtes en stock {low && "— stock bas"}</p>
               </div>
             );
           })}
@@ -2231,15 +2231,16 @@ function StockModule({ data, setData }) {
                   const t = typeStock.find((x) => x.brand === brand && x.type === type) || { quantity: 0, minQuantity: 15 };
                   const low = t.quantity <= t.minQuantity;
                   return (
-                    <div key={type} className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-stone-500">{type}</p>
-                        <p className={`text-sm font-semibold ${low ? "text-rose-600" : "text-stone-800"}`}>{fmtNum(t.quantity)}</p>
-                      </div>
-                      <div className="flex gap-1">
-                        <button onClick={() => adjustTypeStock(brand, type, -1)} className="w-6 h-6 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-medium">−</button>
-                        <button onClick={() => adjustTypeStock(brand, type, 1)} className="w-6 h-6 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-medium">+</button>
-                      </div>
+                    <div key={type} className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-stone-500 w-14 shrink-0">{type}</p>
+                      <input
+                        key={t.quantity}
+                        type="number"
+                        defaultValue={t.quantity}
+                        onBlur={(e) => setTypeStockValue(brand, type, Number(e.target.value) || 0)}
+                        onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                        className={`flex-1 text-sm font-semibold px-2 py-1 rounded-lg border border-stone-200 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 ${low ? "text-rose-600" : "text-stone-800"}`}
+                      />
                     </div>
                   );
                 })}
