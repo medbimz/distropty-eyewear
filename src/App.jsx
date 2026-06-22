@@ -299,29 +299,29 @@ function buildDemoData() {
   }
   cheques.sort((a, b) => new Date(b.issueDate) - new Date(a.issueDate));
 
-  // ---------- Stock de boîtes (emballages) par marque ----------
-  const boxStock = BRANDS.map((brand) => ({
+  // ---------- Journal d'achats de boîtes (emballages) par marque ----------
+  const boxPurchases = BRANDS.map((brand) => ({
     id: uid(),
     brand,
     quantity: randInt(50, 300),
-    minQuantity: 30,
+    date: monthsAgoISO(randInt(1, 5)),
   }));
 
-  // ---------- Sous-stock par marque + type (Optique/Solaire/Clips) ----------
-  const typeStock = [];
+  // ---------- Journal d'achats de montures par marque + type (Optique/Solaire/Clips) ----------
+  const typePurchases = [];
   BRANDS.forEach((brand) => {
     ["Optique", "Solaire", "Clips"].forEach((type) => {
-      typeStock.push({
+      typePurchases.push({
         id: uid(),
         brand,
         type,
         quantity: randInt(20, 150),
-        minQuantity: 15,
+        date: monthsAgoISO(randInt(1, 5)),
       });
     });
   });
 
-  return { employees, clients, stock, sales, expenses, fuelLogs, offers, cheques, boxStock, typeStock };
+  return { employees, clients, stock, sales, expenses, fuelLogs, offers, cheques, boxPurchases, typePurchases };
 }
 
 
@@ -379,20 +379,20 @@ function rowToCheque(r) {
 function chequeToRow(c) {
   return { id: c.id, direction: c.direction, number: c.number, bank: c.bank, amount: c.amount, issue_date: c.issueDate, due_date: c.dueDate, status: c.status, client_id: c.clientId, payee: c.payee, note: c.note };
 }
-function rowToBoxStock(r) {
-  return { id: r.id, brand: r.brand, quantity: r.quantity, minQuantity: r.min_quantity };
+function rowToBoxPurchase(r) {
+  return { id: r.id, brand: r.brand, quantity: r.quantity, date: r.date };
 }
-function boxStockToRow(b) {
-  return { id: b.id, brand: b.brand, quantity: b.quantity, min_quantity: b.minQuantity };
+function boxPurchaseToRow(b) {
+  return { id: b.id, brand: b.brand, quantity: b.quantity, date: b.date };
 }
-function rowToTypeStock(r) {
-  return { id: r.id, brand: r.brand, type: r.type, quantity: r.quantity, minQuantity: r.min_quantity };
+function rowToTypePurchase(r) {
+  return { id: r.id, brand: r.brand, type: r.type, quantity: r.quantity, date: r.date };
 }
-function typeStockToRow(t) {
-  return { id: t.id, brand: t.brand, type: t.type, quantity: t.quantity, min_quantity: t.minQuantity };
+function typePurchaseToRow(t) {
+  return { id: t.id, brand: t.brand, type: t.type, quantity: t.quantity, date: t.date };
 }
 
-const EMPTY_DATA = { employees: [], clients: [], stock: [], sales: [], expenses: [], fuelLogs: [], offers: [], cheques: [], boxStock: [], typeStock: [] };
+const EMPTY_DATA = { employees: [], clients: [], stock: [], sales: [], expenses: [], fuelLogs: [], offers: [], cheques: [], boxPurchases: [], typePurchases: [] };
 
 function useStore() {
   const [data, setDataState] = useState(EMPTY_DATA);
@@ -412,8 +412,8 @@ function useStore() {
         supabase.from("fuel_logs").select("*").order("date", { ascending: false }),
         supabase.from("offers").select("*").order("created_at"),
         supabase.from("cheques").select("*").order("issue_date", { ascending: false }),
-        supabase.from("box_stock").select("*").order("created_at"),
-        supabase.from("type_stock").select("*").order("created_at"),
+        supabase.from("box_purchases").select("*").order("date", { ascending: false }),
+        supabase.from("type_purchases").select("*").order("date", { ascending: false }),
       ]);
       const firstError = [emp, cli, stk, sal, exp, fuel, off, chq, box, typ].find((r) => r.error)?.error;
       if (firstError) throw firstError;
@@ -426,8 +426,8 @@ function useStore() {
         fuelLogs: (fuel.data || []).map(rowToFuel),
         offers: (off.data || []).map(rowToOffer),
         cheques: (chq.data || []).map(rowToCheque),
-        boxStock: (box.data || []).map(rowToBoxStock),
-        typeStock: (typ.data || []).map(rowToTypeStock),
+        boxPurchases: (box.data || []).map(rowToBoxPurchase),
+        typePurchases: (typ.data || []).map(rowToTypePurchase),
       });
     } catch (e) {
       setError(e.message || "Erreur de chargement des données");
@@ -457,8 +457,8 @@ function useStore() {
     fuelLogs: { table: "fuel_logs", toRow: fuelToRow },
     offers: { table: "offers", toRow: offerToRow },
     cheques: { table: "cheques", toRow: chequeToRow },
-    boxStock: { table: "box_stock", toRow: boxStockToRow },
-    typeStock: { table: "type_stock", toRow: typeStockToRow },
+    boxPurchases: { table: "box_purchases", toRow: boxPurchaseToRow },
+    typePurchases: { table: "type_purchases", toRow: typePurchaseToRow },
   };
 
   async function syncToSupabase(prev, next) {
@@ -2124,53 +2124,95 @@ function StockForm({ initial, onSave, onCancel }) {
   );
 }
 
+function PurchaseModal({ title, brands, types, onSave, onCancel }) {
+  const [form, setForm] = useState({ brand: brands[0], type: types?.[0] || null, quantity: "", date: todayISO() });
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); onSave({ ...form, quantity: Number(form.quantity) || 0 }); }}>
+      <Field label="Marque">
+        <select className={selectCls} value={form.brand} onChange={(e) => set("brand", e.target.value)}>
+          {brands.map((b) => <option key={b}>{b}</option>)}
+        </select>
+      </Field>
+      {types && (
+        <Field label="Type">
+          <select className={selectCls} value={form.type} onChange={(e) => set("type", e.target.value)}>
+            {types.map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </Field>
+      )}
+      <div className="grid grid-cols-2 gap-x-3">
+        <Field label="Quantité achetée"><input type="number" className={inputCls} value={form.quantity} onChange={(e) => set("quantity", e.target.value)} required autoFocus /></Field>
+        <Field label="Date d'achat"><input type="date" className={inputCls} value={form.date} onChange={(e) => set("date", e.target.value)} required /></Field>
+      </div>
+      <div className="flex justify-end gap-2 mt-4">
+        <Button variant="secondary" onClick={onCancel}>Annuler</Button>
+        <Button type="submit">Enregistrer l'achat</Button>
+      </div>
+    </form>
+  );
+}
+
 function StockModule({ data, setData }) {
   const [search, setSearch] = useState("");
   const [brandFilter, setBrandFilter] = useState("Toutes");
   const [cityFilter, setCityFilter] = useState("Toutes");
   const [modal, setModal] = useState(null);
+  const [boxPurchaseModal, setBoxPurchaseModal] = useState(false);
+  const [typePurchaseModal, setTypePurchaseModal] = useState(false);
+  const [boxHistoryOpen, setBoxHistoryOpen] = useState(false);
+  const [typeHistoryOpen, setTypeHistoryOpen] = useState(false);
 
   const lowStock = useMemo(() => data.stock.filter((s) => s.quantity <= s.minQuantity), [data.stock]);
   const totalValue = useMemo(() => data.stock.reduce((s, x) => s + x.quantity * x.costPrice, 0), [data.stock]);
 
-  const boxStock = data.boxStock || [];
-  const typeStock = data.typeStock || [];
+  const boxPurchases = data.boxPurchases || [];
+  const typePurchases = data.typePurchases || [];
 
-  const setBoxStockValue = (brand, value) => {
-    setData((d) => {
-      const existing = (d.boxStock || []).find((b) => b.brand === brand);
-      if (existing) {
-        return {
-          ...d,
-          boxStock: d.boxStock.map((b) =>
-            b.brand === brand ? { ...b, quantity: Math.max(0, value) } : b
-          ),
-        };
-      }
-      return {
-        ...d,
-        boxStock: [...(d.boxStock || []), { id: uid(), brand, quantity: Math.max(0, value), minQuantity: 30 }],
-      };
-    });
-  };
+  // Une vente de monture consomme 1 boîte de la même marque, et compte comme "vendu" pour son type
+  const boxSoldByBrand = useMemo(() => {
+    const map = {};
+    data.sales.forEach((s) => { map[s.brand] = (map[s.brand] || 0) + s.quantity; });
+    return map;
+  }, [data.sales]);
 
-  const setTypeStockValue = (brand, type, value) => {
-    setData((d) => {
-      const existing = (d.typeStock || []).find((t) => t.brand === brand && t.type === type);
-      if (existing) {
-        return {
-          ...d,
-          typeStock: d.typeStock.map((t) =>
-            t.brand === brand && t.type === type ? { ...t, quantity: Math.max(0, value) } : t
-          ),
-        };
-      }
-      return {
-        ...d,
-        typeStock: [...(d.typeStock || []), { id: uid(), brand, type, quantity: Math.max(0, value), minQuantity: 15 }],
-      };
+  const typeSoldByBrandType = useMemo(() => {
+    const map = {};
+    data.sales.forEach((s) => {
+      const stockItem = data.stock.find((x) => x.id === s.stockId);
+      const type = stockItem?.type;
+      if (!type) return;
+      const key = `${s.brand}|${type}`;
+      map[key] = (map[key] || 0) + s.quantity;
     });
+    return map;
+  }, [data.sales, data.stock]);
+
+  const boxPurchasedByBrand = useMemo(() => {
+    const map = {};
+    boxPurchases.forEach((p) => { map[p.brand] = (map[p.brand] || 0) + p.quantity; });
+    return map;
+  }, [boxPurchases]);
+
+  const typePurchasedByBrandType = useMemo(() => {
+    const map = {};
+    typePurchases.forEach((p) => {
+      const key = `${p.brand}|${p.type}`;
+      map[key] = (map[key] || 0) + p.quantity;
+    });
+    return map;
+  }, [typePurchases]);
+
+  const saveBoxPurchase = (purchase) => {
+    setData((d) => ({ ...d, boxPurchases: [...(d.boxPurchases || []), { ...purchase, id: uid() }] }));
+    setBoxPurchaseModal(false);
   };
+  const saveTypePurchase = (purchase) => {
+    setData((d) => ({ ...d, typePurchases: [...(d.typePurchases || []), { ...purchase, id: uid() }] }));
+    setTypePurchaseModal(false);
+  };
+  const deleteBoxPurchase = (id) => setData((d) => ({ ...d, boxPurchases: (d.boxPurchases || []).filter((p) => p.id !== id) }));
+  const deleteTypePurchase = (id) => setData((d) => ({ ...d, typePurchases: (d.typePurchases || []).filter((p) => p.id !== id) }));
 
   const filtered = useMemo(() => {
     return data.stock.filter((s) => {
@@ -2200,26 +2242,31 @@ function StockModule({ data, setData }) {
       />
 
       <div className="bg-white rounded-2xl border border-stone-200 p-4 mb-6">
-        <p className="text-sm font-medium text-stone-700 mb-3">Stock de boîtes (emballages) par marque</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-medium text-stone-700">Boîtes (emballages) par marque — Acheté / Vendu / Restant</p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setBoxHistoryOpen(true)}>Historique</Button>
+            <Button size="sm" icon={Plus} onClick={() => setBoxPurchaseModal(true)}>Enregistrer un achat</Button>
+          </div>
+        </div>
         <div className="grid sm:grid-cols-3 gap-3">
           {BRANDS.map((brand) => {
-            const box = boxStock.find((b) => b.brand === brand) || { quantity: 0, minQuantity: 30 };
-            const low = box.quantity <= box.minQuantity;
+            const purchased = boxPurchasedByBrand[brand] || 0;
+            const sold = boxSoldByBrand[brand] || 0;
+            const remaining = purchased - sold;
+            const low = remaining <= 30;
             return (
               <div key={brand} className="rounded-xl border border-stone-200 p-3.5">
                 <div className="flex items-center justify-between mb-2">
                   <Badge color={BRAND_COLORS[brand]?.text} bg={BRAND_COLORS[brand]?.light}>{brand}</Badge>
                   {low && <AlertTriangle size={14} className="text-amber-500" />}
                 </div>
-                <input
-                  key={box.quantity}
-                  type="number"
-                  defaultValue={box.quantity}
-                  onBlur={(e) => setBoxStockValue(brand, Number(e.target.value) || 0)}
-                  onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
-                  className={`w-full text-2xl font-bold mb-1 px-2 py-1 rounded-lg border border-stone-200 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 ${low ? "text-rose-600" : "text-stone-800"}`}
-                />
-                <p className="text-xs text-stone-400">boîtes en stock {low && "— stock bas"}</p>
+                <p className={`text-2xl font-bold mb-2 ${low ? "text-rose-600" : "text-stone-800"}`}>{fmtNum(remaining)}</p>
+                <p className="text-xs text-stone-400 mb-2">restant {low && "— stock bas"}</p>
+                <div className="flex justify-between text-xs text-stone-500 border-t border-stone-100 pt-2">
+                  <span>Acheté : <strong className="text-stone-700">{fmtNum(purchased)}</strong></span>
+                  <span>Vendu : <strong className="text-stone-700">{fmtNum(sold)}</strong></span>
+                </div>
               </div>
             );
           })}
@@ -2227,26 +2274,32 @@ function StockModule({ data, setData }) {
       </div>
 
       <div className="bg-white rounded-2xl border border-stone-200 p-4 mb-6">
-        <p className="text-sm font-medium text-stone-700 mb-3">Stock par marque et type (Optique / Solaire / Clips)</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-medium text-stone-700">Montures par marque et type — Acheté / Vendu / Restant</p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setTypeHistoryOpen(true)}>Historique</Button>
+            <Button size="sm" icon={Plus} onClick={() => setTypePurchaseModal(true)}>Enregistrer un achat</Button>
+          </div>
+        </div>
         <div className="grid sm:grid-cols-3 gap-4">
           {BRANDS.map((brand) => (
             <div key={brand} className="rounded-xl border border-stone-200 p-3.5">
               <Badge color={BRAND_COLORS[brand]?.text} bg={BRAND_COLORS[brand]?.light}>{brand}</Badge>
-              <div className="mt-3 space-y-2.5">
+              <div className="mt-3 space-y-3">
                 {["Optique", "Solaire", "Clips"].map((type) => {
-                  const t = typeStock.find((x) => x.brand === brand && x.type === type) || { quantity: 0, minQuantity: 15 };
-                  const low = t.quantity <= t.minQuantity;
+                  const key = `${brand}|${type}`;
+                  const purchased = typePurchasedByBrandType[key] || 0;
+                  const sold = typeSoldByBrandType[key] || 0;
+                  const remaining = purchased - sold;
+                  const low = remaining <= 15;
                   return (
-                    <div key={type} className="flex items-center justify-between gap-2">
-                      <p className="text-xs text-stone-500 w-14 shrink-0">{type}</p>
-                      <input
-                        key={t.quantity}
-                        type="number"
-                        defaultValue={t.quantity}
-                        onBlur={(e) => setTypeStockValue(brand, type, Number(e.target.value) || 0)}
-                        onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
-                        className={`flex-1 text-sm font-semibold px-2 py-1 rounded-lg border border-stone-200 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 ${low ? "text-rose-600" : "text-stone-800"}`}
-                      />
+                    <div key={type} className="border-t border-stone-100 pt-2 first:border-0 first:pt-0">
+                      <p className="text-xs text-stone-500">{type}</p>
+                      <p className={`text-lg font-bold ${low ? "text-rose-600" : "text-stone-800"}`}>{fmtNum(remaining)}</p>
+                      <div className="flex justify-between text-xs text-stone-400">
+                        <span>Acheté: {fmtNum(purchased)}</span>
+                        <span>Vendu: {fmtNum(sold)}</span>
+                      </div>
                     </div>
                   );
                 })}
@@ -2329,6 +2382,65 @@ function StockModule({ data, setData }) {
       {modal && (
         <Modal title={modal === "new" ? "Ajouter une référence" : "Modifier la référence"} onClose={() => setModal(null)}>
           <StockForm initial={modal === "new" ? null : modal} onSave={saveItem} onCancel={() => setModal(null)} />
+        </Modal>
+      )}
+
+      {boxPurchaseModal && (
+        <Modal title="Enregistrer un achat de boîtes" onClose={() => setBoxPurchaseModal(false)}>
+          <PurchaseModal title="boîtes" brands={BRANDS} types={null} onSave={saveBoxPurchase} onCancel={() => setBoxPurchaseModal(false)} />
+        </Modal>
+      )}
+
+      {typePurchaseModal && (
+        <Modal title="Enregistrer un achat de montures" onClose={() => setTypePurchaseModal(false)}>
+          <PurchaseModal title="montures" brands={BRANDS} types={["Optique", "Solaire", "Clips"]} onSave={saveTypePurchase} onCancel={() => setTypePurchaseModal(false)} />
+        </Modal>
+      )}
+
+      {boxHistoryOpen && (
+        <Modal title="Historique des achats de boîtes" onClose={() => setBoxHistoryOpen(false)} wide>
+          {boxPurchases.length === 0 ? (
+            <EmptyState icon={Package} text="Aucun achat enregistré." />
+          ) : (
+            <div className="space-y-1.5 max-h-96 overflow-y-auto">
+              {[...boxPurchases].sort((a, b) => new Date(b.date) - new Date(a.date)).map((p) => (
+                <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-stone-50">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-stone-400 w-20">{fmtDate(p.date)}</span>
+                    <Badge color={BRAND_COLORS[p.brand]?.text} bg={BRAND_COLORS[p.brand]?.light}>{p.brand}</Badge>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-medium text-stone-700">+{fmtNum(p.quantity)}</span>
+                    <button onClick={() => deleteBoxPurchase(p.id)} className="p-1 rounded hover:bg-rose-50 text-rose-500"><Trash2 size={13} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {typeHistoryOpen && (
+        <Modal title="Historique des achats de montures" onClose={() => setTypeHistoryOpen(false)} wide>
+          {typePurchases.length === 0 ? (
+            <EmptyState icon={Package} text="Aucun achat enregistré." />
+          ) : (
+            <div className="space-y-1.5 max-h-96 overflow-y-auto">
+              {[...typePurchases].sort((a, b) => new Date(b.date) - new Date(a.date)).map((p) => (
+                <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-stone-50">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-stone-400 w-20">{fmtDate(p.date)}</span>
+                    <Badge color={BRAND_COLORS[p.brand]?.text} bg={BRAND_COLORS[p.brand]?.light}>{p.brand}</Badge>
+                    <span className="text-xs text-stone-500">{p.type}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-medium text-stone-700">+{fmtNum(p.quantity)}</span>
+                    <button onClick={() => deleteTypePurchase(p.id)} className="p-1 rounded hover:bg-rose-50 text-rose-500"><Trash2 size={13} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </Modal>
       )}
     </div>
@@ -2423,27 +2535,12 @@ function SalesModule({ data, setData }) {
         };
       }),
       stock: d.stock.map((s) => (s.id === sale.stockId ? { ...s, quantity: Math.max(0, s.quantity - sale.quantity) } : s)),
-      boxStock: (d.boxStock || []).some((b) => b.brand === sale.brand)
-        ? d.boxStock.map((b) => (b.brand === sale.brand ? { ...b, quantity: Math.max(0, b.quantity - sale.quantity) } : b))
-        : [...(d.boxStock || []), { id: uid(), brand: sale.brand, quantity: 0, minQuantity: 30 }],
-      typeStock: (d.typeStock || []).some((t) => t.brand === sale.brand && t.type === sale.type)
-        ? d.typeStock.map((t) => (t.brand === sale.brand && t.type === sale.type ? { ...t, quantity: Math.max(0, t.quantity - sale.quantity) } : t))
-        : [...(d.typeStock || []), { id: uid(), brand: sale.brand, type: sale.type, quantity: 0, minQuantity: 15 }],
     }));
     setModal(null);
   };
 
   const deleteSale = (id) => {
-    setData((d) => {
-      const sale = d.sales.find((s) => s.id === id);
-      return {
-        ...d,
-        sales: d.sales.filter((s) => s.id !== id),
-        boxStock: sale
-          ? (d.boxStock || []).map((b) => (b.brand === sale.brand ? { ...b, quantity: b.quantity + sale.quantity } : b))
-          : d.boxStock,
-      };
-    });
+    setData((d) => ({ ...d, sales: d.sales.filter((s) => s.id !== id) }));
   };
 
   return (
