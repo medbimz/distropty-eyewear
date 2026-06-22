@@ -493,9 +493,12 @@ function useStore() {
    COMPOSANTS UI PARTAGÉS
 ============================================================ */
 
-function StatCard({ label, value, icon: Icon, accent = "#6B4E9E", sub }) {
+function StatCard({ label, value, icon: Icon, accent = "#6B4E9E", sub, onClick }) {
   return (
-    <div className="rounded-2xl bg-white border border-stone-200 p-4 flex items-start gap-3 shadow-sm">
+    <div
+      onClick={onClick}
+      className={`rounded-2xl bg-white border border-stone-200 p-4 flex items-start gap-3 shadow-sm ${onClick ? "cursor-pointer hover:border-stone-300 hover:shadow-md transition" : ""}`}
+    >
       <div
         className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
         style={{ background: accent + "1A", color: accent }}
@@ -697,7 +700,7 @@ function TopBar({ title, onMenuClick }) {
    MODULE : TABLEAU DE BORD
 ============================================================ */
 
-function DashboardModule({ data }) {
+function DashboardModule({ data, onNavigate }) {
   const { employees, clients, stock, sales, expenses, fuelLogs } = data;
   const currentYear = new Date().getFullYear();
 
@@ -757,21 +760,24 @@ function DashboardModule({ data }) {
       <PageHeader title="Tableau de bord" subtitle={`Vue d'ensemble de l'activité — ${currentYear}`} />
 
       {lowStockItems.length > 0 && (
-        <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2.5 text-amber-800 text-sm">
+        <div
+          onClick={() => onNavigate?.("stock")}
+          className="mb-5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2.5 text-amber-800 text-sm cursor-pointer hover:bg-amber-100 transition"
+        >
           <AlertTriangle size={16} className="shrink-0" />
           <span><strong>{lowStockItems.length}</strong> référence(s) en stock bas nécessitent un réapprovisionnement.</span>
         </div>
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <StatCard label="Chiffre d'affaires total" value={fmtMAD(totalRevenue)} icon={TrendingUp} accent="#3B8C6E" />
-        <StatCard label="Dépenses totales" value={fmtMAD(totalExpenses)} icon={Wallet} accent="#B23A55" />
-        <StatCard label="Coût carburant cumulé" value={fmtMAD(totalFuel)} icon={Fuel} accent="#C8862E" />
-        <StatCard label="Bénéfice net" value={fmtMAD(netProfit)} icon={Landmark} accent="#6B4E9E" />
-        <StatCard label="Employés actifs" value={activeEmployees} icon={Users} accent="#4A6E8C" />
-        <StatCard label="Clients (opticiens)" value={clients.length} icon={Heart} accent="#B23A55" />
-        <StatCard label="Articles en stock" value={fmtNum(stock.reduce((s, x) => s + x.quantity, 0))} icon={Package} accent="#3B8C6E" />
-        <StatCard label="Alertes stock bas" value={lowStockItems.length} icon={AlertTriangle} accent="#C8862E" />
+        <StatCard label="Chiffre d'affaires total" value={fmtMAD(totalRevenue)} icon={TrendingUp} accent="#3B8C6E" onClick={() => onNavigate?.("sales")} />
+        <StatCard label="Dépenses totales" value={fmtMAD(totalExpenses)} icon={Wallet} accent="#B23A55" onClick={() => onNavigate?.("expenses")} />
+        <StatCard label="Coût carburant cumulé" value={fmtMAD(totalFuel)} icon={Fuel} accent="#C8862E" onClick={() => onNavigate?.("fuel")} />
+        <StatCard label="Bénéfice net" value={fmtMAD(netProfit)} icon={Landmark} accent="#6B4E9E" onClick={() => onNavigate?.("finance")} />
+        <StatCard label="Employés actifs" value={activeEmployees} icon={Users} accent="#4A6E8C" onClick={() => onNavigate?.("employees")} />
+        <StatCard label="Clients (opticiens)" value={clients.length} icon={Heart} accent="#B23A55" onClick={() => onNavigate?.("clients")} />
+        <StatCard label="Articles en stock" value={fmtNum(stock.reduce((s, x) => s + x.quantity, 0))} icon={Package} accent="#3B8C6E" onClick={() => onNavigate?.("stock")} />
+        <StatCard label="Alertes stock bas" value={lowStockItems.length} icon={AlertTriangle} accent="#C8862E" onClick={() => onNavigate?.("stock")} />
       </div>
 
       <div className="grid lg:grid-cols-3 gap-4 mb-6">
@@ -793,7 +799,7 @@ function DashboardModule({ data }) {
 
         <div className="bg-white rounded-2xl border border-stone-200 p-4">
           <p className="text-sm font-medium text-stone-700 mb-3">Revenu par marque</p>
-          <div style={{ width: "100%", height: 220 }}>
+          <div onClick={() => onNavigate?.("sales")} className="cursor-pointer" style={{ width: "100%", height: 220 }}>
             <ResponsiveContainer>
               <PieChart>
                 <Pie data={brandRevenue} dataKey="value" nameKey="name" innerRadius={45} outerRadius={75} paddingAngle={2}>
@@ -818,7 +824,11 @@ function DashboardModule({ data }) {
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="bg-white rounded-2xl border border-stone-200 p-4">
           <p className="text-sm font-medium text-stone-700 mb-3">Top des villes par revenu</p>
-          <div style={{ width: "100%", height: 240 }}>
+          <div
+            onClick={() => onNavigate?.("sales")}
+            className="cursor-pointer"
+            style={{ width: "100%", height: 240 }}
+          >
             <ResponsiveContainer>
               <BarChart data={cityRevenue} layout="vertical" margin={{ left: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0eee9" horizontal={false} />
@@ -835,7 +845,11 @@ function DashboardModule({ data }) {
           <p className="text-sm font-medium text-stone-700 mb-3">Meilleurs employés par chiffre d'affaires</p>
           <div className="space-y-2.5">
             {topEmployees.map((emp, i) => (
-              <div key={emp.name} className="flex items-center gap-3">
+              <div
+                key={emp.name}
+                onClick={() => onNavigate?.("employees")}
+                className="flex items-center gap-3 cursor-pointer hover:bg-stone-50 rounded-lg px-1.5 py-1 -mx-1.5 transition"
+              >
                 <div className="w-7 h-7 rounded-full bg-indigo-50 text-indigo-700 flex items-center justify-center text-xs font-semibold shrink-0">
                   {i + 1}
                 </div>
@@ -2760,7 +2774,7 @@ function ChequesModule({ data, setData }) {
    MODULE : SUIVI FINANCIER
 ============================================================ */
 
-function FinanceModule({ data }) {
+function FinanceModule({ data, onNavigate }) {
   const [period, setPeriod] = useState("Annuel"); // "Mensuel" | "Annuel"
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth());
@@ -2928,7 +2942,11 @@ function FinanceModule({ data }) {
             </thead>
             <tbody>
               {employeePerf.map((e, i) => (
-                <tr key={e.id} className="border-t border-stone-100 hover:bg-stone-50">
+                <tr
+                  key={e.id}
+                  onClick={() => onNavigate?.("employees")}
+                  className="border-t border-stone-100 hover:bg-stone-50 cursor-pointer"
+                >
                   <td className="px-4 py-2.5 text-stone-500">{i + 1}</td>
                   <td className="px-4 py-2.5">
                     <p className="font-medium text-stone-800">{e.name}</p>
@@ -3054,7 +3072,7 @@ function MainApp() {
 
   let content;
   switch (active) {
-    case "dashboard": content = <DashboardModule data={data} />; break;
+    case "dashboard": content = <DashboardModule data={data} onNavigate={setActive} />; break;
     case "employees": content = <EmployeesModule data={data} setData={setData} />; break;
     case "expenses": content = <ExpensesModule data={data} setData={setData} />; break;
     case "fuel": content = <FuelModule data={data} setData={setData} />; break;
@@ -3063,7 +3081,7 @@ function MainApp() {
     case "stock": content = <StockModule data={data} setData={setData} />; break;
     case "sales": content = <SalesModule data={data} setData={setData} />; break;
     case "cheques": content = <ChequesModule data={data} setData={setData} />; break;
-    case "finance": content = <FinanceModule data={data} />; break;
+    case "finance": content = <FinanceModule data={data} onNavigate={setActive} />; break;
     default: content = null;
   }
 
