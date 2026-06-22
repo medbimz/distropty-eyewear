@@ -2415,11 +2415,25 @@ function SalesModule({ data, setData }) {
         };
       }),
       stock: d.stock.map((s) => (s.id === sale.stockId ? { ...s, quantity: Math.max(0, s.quantity - sale.quantity) } : s)),
+      boxStock: (d.boxStock || []).some((b) => b.brand === sale.brand)
+        ? d.boxStock.map((b) => (b.brand === sale.brand ? { ...b, quantity: Math.max(0, b.quantity - sale.quantity) } : b))
+        : [...(d.boxStock || []), { id: uid(), brand: sale.brand, quantity: 0, minQuantity: 30 }],
     }));
     setModal(null);
   };
 
-  const deleteSale = (id) => setData((d) => ({ ...d, sales: d.sales.filter((s) => s.id !== id) }));
+  const deleteSale = (id) => {
+    setData((d) => {
+      const sale = d.sales.find((s) => s.id === id);
+      return {
+        ...d,
+        sales: d.sales.filter((s) => s.id !== id),
+        boxStock: sale
+          ? (d.boxStock || []).map((b) => (b.brand === sale.brand ? { ...b, quantity: b.quantity + sale.quantity } : b))
+          : d.boxStock,
+      };
+    });
+  };
 
   return (
     <div>
