@@ -49,6 +49,23 @@ const LOYALTY_TIERS = [
   { key: "Platine",  min: 2500, color: "#4A6E8C", bg: "#E9F1F6" },
 ];
 
+// Paliers de cagnotte par défaut, basés sur le montant de chaque vente.
+// Modifiables dans Clients & fidélité → Paramètres de cagnotte.
+const DEFAULT_CASHBACK_TIERS = [
+  { min: 5000,  rate: 5 },
+  { min: 15000, rate: 8 },
+  { min: 22000, rate: 10 },
+];
+
+function getCashbackRateForAmount(amount, tiers) {
+  const sorted = [...tiers].sort((a, b) => a.min - b.min);
+  let rate = 0;
+  for (const t of sorted) {
+    if (amount >= t.min) rate = t.rate;
+  }
+  return rate;
+}
+
 const CHEQUE_BANKS = [
   "Attijariwafa Bank", "Banque Populaire", "BMCE Bank", "BMCI",
   "CIH Bank", "Crédit du Maroc", "Société Générale Maroc", "Al Barid Bank",
@@ -321,7 +338,10 @@ function buildDemoData() {
     });
   });
 
-  return { employees, clients, stock, sales, expenses, fuelLogs, offers, cheques, boxPurchases, typePurchases };
+  // ---------- Paliers de cagnotte (configurables) ----------
+  const cashbackTiers = DEFAULT_CASHBACK_TIERS.map((t) => ({ id: uid(), min: t.min, rate: t.rate }));
+
+  return { employees, clients, stock, sales, expenses, fuelLogs, offers, cheques, boxPurchases, typePurchases, cashbackTiers };
 }
 
 
@@ -391,8 +411,14 @@ function rowToTypePurchase(r) {
 function typePurchaseToRow(t) {
   return { id: t.id, brand: t.brand, type: t.type, quantity: t.quantity, date: t.date };
 }
+function rowToCashbackTier(r) {
+  return { id: r.id, min: r.min_amount, rate: r.rate };
+}
+function cashbackTierToRow(t) {
+  return { id: t.id, min_amount: t.min, rate: t.rate };
+}
 
-const EMPTY_DATA = { employees: [], clients: [], stock: [], sales: [], expenses: [], fuelLogs: [], offers: [], cheques: [], boxPurchases: [], typePurchases: [] };
+const EMPTY_DATA = { employees: [], clients: [], stock: [], sales: [], expenses: [], fuelLogs: [], offers: [], cheques: [], boxPurchases: [], typePurchases: [], cashbackTiers: [] };
 
 function useStore() {
   const [data, setDataState] = useState(EMPTY_DATA);
@@ -403,7 +429,7 @@ function useStore() {
     setLoading(true);
     setError(null);
     try {
-      const [emp, cli, stk, sal, exp, fuel, off, chq, box, typ] = await Promise.all([
+      const [emp, cli, stk, sal, exp, fuel, off, chq, box, typ, cbt] = await Promise.all([
         supabase.from("employees").select("*").order("created_at"),
         supabase.from("clients").select("*").order("created_at"),
         supabase.from("stock").select("*").order("created_at"),
@@ -414,8 +440,9 @@ function useStore() {
         supabase.from("cheques").select("*").order("issue_date", { ascending: false }),
         supabase.from("box_purchases").select("*").order("date", { ascending: false }),
         supabase.from("type_purchases").select("*").order("date", { ascending: false }),
+        supabase.from("cashback_tiers").select("*").order("min_amount"),
       ]);
-      const firstError = [emp, cli, stk, sal, exp, fuel, off, chq, box, typ].find((r) => r.error)?.error;
+      const firstError = [emp, cli, stk, sal, exp, fuel, off, chq, box, typ, cbt].find((r) => r.error)?.error;
       if (firstError) throw firstError;
       setDataState({
         employees: (emp.data || []).map(rowToEmployee),
@@ -428,6 +455,7 @@ function useStore() {
         cheques: (chq.data || []).map(rowToCheque),
         boxPurchases: (box.data || []).map(rowToBoxPurchase),
         typePurchases: (typ.data || []).map(rowToTypePurchase),
+        cashbackTiers: (cbt.data || []).map(rowToCashbackTier),
       });
     } catch (e) {
       setError(e.message || "Erreur de chargement des données");
@@ -459,6 +487,7 @@ function useStore() {
     cheques: { table: "cheques", toRow: chequeToRow },
     boxPurchases: { table: "box_purchases", toRow: boxPurchaseToRow },
     typePurchases: { table: "type_purchases", toRow: typePurchaseToRow },
+    cashbackTiers: { table: "cashback_tiers", toRow: cashbackTierToRow },
   };
 
   async function syncToSupabase(prev, next) {
@@ -1675,12 +1704,14 @@ function ClientForm({ initial, onSave, onCancel }) {
           ))}
         </div>
       </Field>
-      <Field label="Taux de cagnotte sur achats (%)">
+      <Field label="Taux de cagnotte personnalisé (%) — optionnel, cas négocié">
         <select className={selectCls} value={form.cashbackRate} onChange={(e) => set("cashbackRate", e.target.value)}>
-          <option value="0">Aucune cagnotte</option>
-          <option value="5">5%</option>
-          <option value="10">10%</option>
+          <option value="0">Aucun (utiliser les paliers automatiques)</option>
+          <option value="5">5% fixe</option>
+          <option value="8">8% fixe</option>
+          <option value="10">10% fixe</option>
         </select>
+        <p className="text-xs text-stone-400 mt-1">Si défini, ce taux remplace les paliers automatiques basés sur le montant de chaque vente.</p>
       </Field>
       {initial && (
         <div className="bg-stone-50 rounded-xl p-3 mb-3 text-sm">
@@ -1761,6 +1792,44 @@ function UseCashbackModal({ client, onSave, onCancel }) {
   );
 }
 
+function CashbackTiersForm({ tiers, onSave, onCancel }) {
+  const [rows, setRows] = useState(tiers.map((t) => ({ ...t })));
+
+  const updateRow = (id, key, value) => {
+    setRows((r) => r.map((row) => (row.id === id ? { ...row, [key]: Number(value) || 0 } : row)));
+  };
+  const removeRow = (id) => setRows((r) => r.filter((row) => row.id !== id));
+  const addRow = () => setRows((r) => [...r, { id: uid(), min: 0, rate: 0 }]);
+
+  return (
+    <div>
+      <p className="text-sm text-stone-500 mb-4">
+        Définis les seuils de montant (MAD) par vente et le taux de cagnotte appliqué automatiquement. Un client avec un taux personnalisé sur sa fiche ignore ces paliers.
+      </p>
+      <div className="space-y-2 mb-4">
+        {rows.sort((a, b) => a.min - b.min).map((row) => (
+          <div key={row.id} className="flex items-center gap-3">
+            <div className="flex-1">
+              <span className="text-xs text-stone-400 block mb-1">Montant de vente à partir de (MAD)</span>
+              <input type="number" className={inputCls} value={row.min} onChange={(e) => updateRow(row.id, "min", e.target.value)} />
+            </div>
+            <div className="w-28">
+              <span className="text-xs text-stone-400 block mb-1">Taux (%)</span>
+              <input type="number" className={inputCls} value={row.rate} onChange={(e) => updateRow(row.id, "rate", e.target.value)} />
+            </div>
+            <button type="button" onClick={() => removeRow(row.id)} className="mt-5 p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
+          </div>
+        ))}
+      </div>
+      <Button variant="secondary" icon={Plus} onClick={addRow}>Ajouter un palier</Button>
+      <div className="flex justify-end gap-2 mt-5">
+        <Button variant="secondary" onClick={onCancel}>Annuler</Button>
+        <Button onClick={() => onSave(rows)}>Enregistrer</Button>
+      </div>
+    </div>
+  );
+}
+
 function ClientsModule({ data, setData }) {
   const [search, setSearch] = useState("");
   const [tierFilter, setTierFilter] = useState("Tous");
@@ -1768,6 +1837,7 @@ function ClientsModule({ data, setData }) {
   const [modal, setModal] = useState(null);
   const [awardModal, setAwardModal] = useState(null);
   const [cashbackModal, setCashbackModal] = useState(null);
+  const [tiersSettingsOpen, setTiersSettingsOpen] = useState(false);
 
   const filtered = useMemo(() => {
     return data.clients.filter((c) => {
@@ -1795,7 +1865,9 @@ function ClientsModule({ data, setData }) {
       ...d,
       clients: d.clients.map((c) => {
         if (c.id !== clientId) return c;
-        const cashbackEarned = amount * ((c.cashbackRate || 0) / 100);
+        const tiers = d.cashbackTiers?.length ? d.cashbackTiers : DEFAULT_CASHBACK_TIERS;
+        const effectiveRate = c.cashbackRate > 0 ? c.cashbackRate : getCashbackRateForAmount(amount, tiers);
+        const cashbackEarned = amount * (effectiveRate / 100);
         return {
           ...c,
           points: c.points + pointsToAdd,
@@ -1825,7 +1897,12 @@ function ClientsModule({ data, setData }) {
       <PageHeader
         title="Clients & fidélité"
         subtitle={`${data.clients.length} opticien(s) partenaire(s)`}
-        action={<Button icon={Plus} onClick={() => setModal("new")}>Ajouter un client</Button>}
+        action={
+          <div className="flex gap-2">
+            <Button variant="secondary" icon={Landmark} onClick={() => setTiersSettingsOpen(true)}>Paliers de cagnotte</Button>
+            <Button icon={Plus} onClick={() => setModal("new")}>Ajouter un client</Button>
+          </div>
+        }
       />
 
       <div className="flex flex-wrap gap-2.5 mb-5">
@@ -1910,6 +1987,18 @@ function ClientsModule({ data, setData }) {
       {cashbackModal && (
         <Modal title="Utiliser la cagnotte" onClose={() => setCashbackModal(null)}>
           <UseCashbackModal client={cashbackModal} onSave={(amt) => useCashback(cashbackModal.id, amt)} onCancel={() => setCashbackModal(null)} />
+        </Modal>
+      )}
+      {tiersSettingsOpen && (
+        <Modal title="Paliers de cagnotte (par montant de vente)" onClose={() => setTiersSettingsOpen(false)} wide>
+          <CashbackTiersForm
+            tiers={data.cashbackTiers?.length ? data.cashbackTiers : DEFAULT_CASHBACK_TIERS.map((t) => ({ ...t, id: uid() }))}
+            onSave={(tiers) => {
+              setData((d) => ({ ...d, cashbackTiers: tiers }));
+              setTiersSettingsOpen(false);
+            }}
+            onCancel={() => setTiersSettingsOpen(false)}
+          />
         </Modal>
       )}
     </div>
@@ -2525,7 +2614,10 @@ function SalesModule({ data, setData }) {
       sales: [{ ...sale, id: uid() }, ...d.sales],
       clients: d.clients.map((c) => {
         if (c.id !== sale.clientId) return c;
-        const cashbackEarned = sale.total * ((c.cashbackRate || 0) / 100);
+        // Le taux personnalisé du client (s'il existe) prend le dessus sur les paliers automatiques.
+        const tiers = d.cashbackTiers?.length ? d.cashbackTiers : DEFAULT_CASHBACK_TIERS;
+        const effectiveRate = c.cashbackRate > 0 ? c.cashbackRate : getCashbackRateForAmount(sale.total, tiers);
+        const cashbackEarned = sale.total * (effectiveRate / 100);
         return {
           ...c,
           totalSpent: c.totalSpent + sale.total,
