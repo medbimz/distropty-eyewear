@@ -623,6 +623,44 @@ function EmptyState({ icon: Icon, text }) {
   );
 }
 
+// Bouton de suppression avec confirmation obligatoire avant d'agir.
+// Remplace tout <button onClick={() => delete...}><Trash2 /></button> de l'app.
+function DeleteButton({ onConfirm, size = 14, className, label = "Supprimer cet élément ?" }) {
+  const [confirming, setConfirming] = useState(false);
+
+  if (confirming) {
+    return (
+      <span className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        <span className="text-xs text-stone-500 hidden sm:inline">{label}</span>
+        <button
+          type="button"
+          onClick={() => { onConfirm(); setConfirming(false); }}
+          className="px-2 py-1 rounded-lg bg-rose-600 text-white text-xs font-medium hover:bg-rose-700"
+        >
+          Confirmer
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirming(false)}
+          className="px-2 py-1 rounded-lg bg-stone-100 text-stone-600 text-xs font-medium hover:bg-stone-200"
+        >
+          Annuler
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
+      className={className || "p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"}
+    >
+      <Trash2 size={size} />
+    </button>
+  );
+}
+
 function SearchInput({ value, onChange, placeholder }) {
   return (
     <div className="relative">
@@ -1065,7 +1103,7 @@ function EmployeesModule({ data, setData }) {
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1 justify-end">
                         <button onClick={() => setModal(e)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                        <button onClick={() => deleteEmployee(e.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
+                        <DeleteButton onConfirm={() => deleteEmployee(e.id)} label="Supprimer cet employé ?" />
                       </div>
                     </td>
                   </tr>
@@ -1343,7 +1381,7 @@ function ExpensesModule({ data, setData }) {
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1 justify-end">
                         <button onClick={() => setModal(e)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                        <button onClick={() => deleteExpense(e.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
+                        <DeleteButton onConfirm={() => deleteExpense(e.id)} label="Supprimer cette dépense ?" />
                       </div>
                     </td>
                   </tr>
@@ -1599,7 +1637,7 @@ function FuelModule({ data, setData }) {
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1 justify-end">
                         <button onClick={() => setModal(f)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                        <button onClick={() => deleteFuel(f.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
+                        <DeleteButton onConfirm={() => deleteFuel(f.id)} label="Supprimer ce plein ?" />
                       </div>
                     </td>
                   </tr>
@@ -2081,7 +2119,7 @@ function ClientsModule({ data, setData }) {
                 <div className="flex gap-1.5 mt-3">
                   <Button size="sm" variant="secondary" onClick={() => setAwardModal(c)}>Attribuer points</Button>
                   <button onClick={() => setModal(c)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                  <button onClick={() => deleteClient(c.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
+                  <DeleteButton onConfirm={() => deleteClient(c.id)} label="Supprimer ce client ?" />
                 </div>
               </div>
             );
@@ -2249,7 +2287,7 @@ function OffersModule({ data, setData }) {
                     {o.active ? "Désactiver" : "Activer"}
                   </Button>
                   <button onClick={() => setModal(o)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                  <button onClick={() => deleteOffer(o.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
+                  <DeleteButton onConfirm={() => deleteOffer(o.id)} label="Supprimer cette offre ?" />
                 </div>
               </div>
             );
@@ -2575,7 +2613,7 @@ function StockModule({ data, setData }) {
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1 justify-end">
                         <button onClick={() => setModal(s)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                        <button onClick={() => deleteItem(s.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
+                        <DeleteButton onConfirm={() => deleteItem(s.id)} label="Supprimer cette référence ?" />
                       </div>
                     </td>
                   </tr>
@@ -2618,7 +2656,7 @@ function StockModule({ data, setData }) {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium text-stone-700">+{fmtNum(p.quantity)}</span>
-                    <button onClick={() => deleteBoxPurchase(p.id)} className="p-1 rounded hover:bg-rose-50 text-rose-500"><Trash2 size={13} /></button>
+                    <DeleteButton onConfirm={() => deleteBoxPurchase(p.id)} size={13} className="p-1 rounded hover:bg-rose-50 text-rose-500" label="Supprimer cet achat ?" />
                   </div>
                 </div>
               ))}
@@ -2642,7 +2680,7 @@ function StockModule({ data, setData }) {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium text-stone-700">+{fmtNum(p.quantity)}</span>
-                    <button onClick={() => deleteTypePurchase(p.id)} className="p-1 rounded hover:bg-rose-50 text-rose-500"><Trash2 size={13} /></button>
+                    <DeleteButton onConfirm={() => deleteTypePurchase(p.id)} size={13} className="p-1 rounded hover:bg-rose-50 text-rose-500" label="Supprimer cet achat ?" />
                   </div>
                 </div>
               ))}
@@ -2857,7 +2895,7 @@ function SalesModule({ data, setData }) {
                       )}
                     </td>
                     <td className="px-4 py-2.5">
-                      <button onClick={() => deleteSale(s.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500 ml-auto block"><Trash2 size={14} /></button>
+                      <DeleteButton onConfirm={() => deleteSale(s.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500 ml-auto block" label="Supprimer cette vente ?" />
                     </td>
                   </tr>
                 );
@@ -3129,7 +3167,7 @@ function ChequesModule({ data, setData }) {
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1 justify-end">
                         <button onClick={() => setModal(c)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                        <button onClick={() => deleteCheque(c.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
+                        <DeleteButton onConfirm={() => deleteCheque(c.id)} label="Supprimer ce chèque ?" />
                       </div>
                     </td>
                   </tr>
