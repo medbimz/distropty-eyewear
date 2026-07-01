@@ -466,16 +466,6 @@ function useStore() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // setData accepte soit un nouvel objet, soit une fonction (updater) — comme useState classique.
-  // Chaque appel recalcule le nouvel état, compare avec l'ancien, et synchronise les différences vers Supabase.
-  const setData = useCallback((updater) => {
-    setDataState((prev) => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      syncToSupabase(prev, next);
-      return next;
-    });
-  }, []);
-
   const TABLES = {
     employees: { table: "employees", toRow: employeeToRow },
     clients: { table: "clients", toRow: clientToRow },
@@ -501,19 +491,30 @@ function useStore() {
       // Suppressions
       const removed = prevList.filter((x) => !nextIds.has(x.id));
       for (const item of removed) {
-        await supabase.from(table).delete().eq("id", item.id);
+        const { error } = await supabase.from(table).delete().eq("id", item.id);
+        if (error) console.error(`Erreur suppression ${table}:`, error);
       }
       // Ajouts et modifications (upsert : insère si nouveau, met à jour si existant)
       const changed = nextList.filter((x) => {
         const before = prevList.find((p) => p.id === x.id);
         return !before || JSON.stringify(before) !== JSON.stringify(x);
       });
-      for (const item of changed) {
-        const row = toRow(item);
-        await supabase.from(table).upsert(row);
+      if (changed.length > 0) {
+        const rows = changed.map((item) => toRow(item));
+        const { error } = await supabase.from(table).upsert(rows);
+        if (error) console.error(`Erreur upsert ${table}:`, error);
       }
     }
   }
+
+  // setData avec sauvegarde Supabase garantie
+  const setData = useCallback((updater) => {
+    setDataState((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      syncToSupabase(prev, next).catch((e) => console.error("Erreur sync Supabase:", e));
+      return next;
+    });
+  }, []);
 
   return [data, setData, loadAll, loading, error];
 }
