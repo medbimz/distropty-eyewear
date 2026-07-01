@@ -90,14 +90,7 @@ const fmtDate = (d) => {
   return date.toLocaleDateString("fr-MA", { day: "2-digit", month: "2-digit", year: "numeric" });
 };
 
-const uid = () => {
-  // Génère un vrai UUID v4 compatible avec Supabase (format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx)
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-};
+const uid = () => Math.random().toString(36).slice(2, 10);
 
 const getTier = (points) => {
   let tier = LOYALTY_TIERS[0];
@@ -473,6 +466,16 @@ function useStore() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  // setData accepte soit un nouvel objet, soit une fonction (updater) — comme useState classique.
+  // Chaque appel recalcule le nouvel état, compare avec l'ancien, et synchronise les différences vers Supabase.
+  const setData = useCallback((updater) => {
+    setDataState((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      syncToSupabase(prev, next);
+      return next;
+    });
+  }, []);
+
   const TABLES = {
     employees: { table: "employees", toRow: employeeToRow },
     clients: { table: "clients", toRow: clientToRow },
@@ -498,30 +501,19 @@ function useStore() {
       // Suppressions
       const removed = prevList.filter((x) => !nextIds.has(x.id));
       for (const item of removed) {
-        const { error } = await supabase.from(table).delete().eq("id", item.id);
-        if (error) console.error(`Erreur suppression ${table}:`, error);
+        await supabase.from(table).delete().eq("id", item.id);
       }
       // Ajouts et modifications (upsert : insère si nouveau, met à jour si existant)
       const changed = nextList.filter((x) => {
         const before = prevList.find((p) => p.id === x.id);
         return !before || JSON.stringify(before) !== JSON.stringify(x);
       });
-      if (changed.length > 0) {
-        const rows = changed.map((item) => toRow(item));
-        const { error } = await supabase.from(table).upsert(rows);
-        if (error) console.error(`Erreur upsert ${table}:`, error);
+      for (const item of changed) {
+        const row = toRow(item);
+        await supabase.from(table).upsert(row);
       }
     }
   }
-
-  // setData avec sauvegarde Supabase garantie
-  const setData = useCallback((updater) => {
-    setDataState((prev) => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      syncToSupabase(prev, next).catch((e) => console.error("Erreur sync Supabase:", e));
-      return next;
-    });
-  }, []);
 
   return [data, setData, loadAll, loading, error];
 }
@@ -628,44 +620,6 @@ function EmptyState({ icon: Icon, text }) {
       <Icon size={32} className="mb-2" />
       <p className="text-sm">{text}</p>
     </div>
-  );
-}
-
-// Bouton de suppression avec confirmation obligatoire avant d'agir.
-// Remplace tout <button onClick={() => delete...}><Trash2 /></button> de l'app.
-function DeleteButton({ onConfirm, size = 14, className, label = "Supprimer cet élément ?" }) {
-  const [confirming, setConfirming] = useState(false);
-
-  if (confirming) {
-    return (
-      <span className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-        <span className="text-xs text-stone-500 hidden sm:inline">{label}</span>
-        <button
-          type="button"
-          onClick={() => { onConfirm(); setConfirming(false); }}
-          className="px-2 py-1 rounded-lg bg-rose-600 text-white text-xs font-medium hover:bg-rose-700"
-        >
-          Confirmer
-        </button>
-        <button
-          type="button"
-          onClick={() => setConfirming(false)}
-          className="px-2 py-1 rounded-lg bg-stone-100 text-stone-600 text-xs font-medium hover:bg-stone-200"
-        >
-          Annuler
-        </button>
-      </span>
-    );
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
-      className={className || "p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"}
-    >
-      <Trash2 size={size} />
-    </button>
   );
 }
 
@@ -1111,7 +1065,7 @@ function EmployeesModule({ data, setData }) {
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1 justify-end">
                         <button onClick={() => setModal(e)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                        <DeleteButton onConfirm={() => deleteEmployee(e.id)} label="Supprimer cet employé ?" />
+                        <button onClick={() => deleteEmployee(e.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
                       </div>
                     </td>
                   </tr>
@@ -1389,7 +1343,7 @@ function ExpensesModule({ data, setData }) {
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1 justify-end">
                         <button onClick={() => setModal(e)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                        <DeleteButton onConfirm={() => deleteExpense(e.id)} label="Supprimer cette dépense ?" />
+                        <button onClick={() => deleteExpense(e.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
                       </div>
                     </td>
                   </tr>
@@ -1645,7 +1599,7 @@ function FuelModule({ data, setData }) {
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1 justify-end">
                         <button onClick={() => setModal(f)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                        <DeleteButton onConfirm={() => deleteFuel(f.id)} label="Supprimer ce plein ?" />
+                        <button onClick={() => deleteFuel(f.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
                       </div>
                     </td>
                   </tr>
@@ -1707,23 +1661,9 @@ function ClientForm({ initial, onSave, onCancel }) {
         <Field label="Email"><input type="email" className={inputCls} value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
       </div>
       <Field label="Ville">
-        <select
-          className={selectCls}
-          value={CITIES.includes(form.city) ? form.city : "__other__"}
-          onChange={(e) => set("city", e.target.value === "__other__" ? "" : e.target.value)}
-        >
+        <select className={selectCls} value={form.city} onChange={(e) => set("city", e.target.value)}>
           {CITIES.map((c) => <option key={c}>{c}</option>)}
-          <option value="__other__">Autre...</option>
         </select>
-        {!CITIES.includes(form.city) && (
-          <input
-            className={inputCls + " mt-2"}
-            placeholder="Nom de la ville"
-            value={form.city}
-            onChange={(e) => set("city", e.target.value)}
-            required
-          />
-        )}
       </Field>
       <Field label="Marques distribuées — clique sur une marque pour voir Optique/Solaire/Clips">
         <div className="space-y-2">
@@ -1890,104 +1830,6 @@ function CashbackTiersForm({ tiers, onSave, onCancel }) {
   );
 }
 
-function ClientDetailModal({ client, data, onClose }) {
-  const clientSales = useMemo(
-    () => data.sales.filter((s) => s.clientId === client.id).sort((a, b) => new Date(b.date) - new Date(a.date)),
-    [data.sales, client.id]
-  );
-
-  const stats = useMemo(() => {
-    if (clientSales.length === 0) return null;
-    const totalSpent = clientSales.reduce((s, x) => s + x.total, 0);
-    const avgBasket = totalSpent / clientSales.length;
-    // Écarts en jours entre achats consécutifs (du plus récent au plus ancien)
-    const gaps = [];
-    for (let i = 0; i < clientSales.length - 1; i++) {
-      const d1 = new Date(clientSales[i].date);
-      const d2 = new Date(clientSales[i + 1].date);
-      gaps.push(Math.round((d1 - d2) / (1000 * 60 * 60 * 24)));
-    }
-    const avgGap = gaps.length ? Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length) : null;
-    const daysSinceLast = Math.round((new Date() - new Date(clientSales[0].date)) / (1000 * 60 * 60 * 24));
-    const brandCounts = {};
-    clientSales.forEach((s) => { brandCounts[s.brand] = (brandCounts[s.brand] || 0) + s.total; });
-    const topBrand = Object.entries(brandCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
-    return { totalSpent, avgBasket, avgGap, daysSinceLast, topBrand, count: clientSales.length };
-  }, [clientSales]);
-
-  const tier = getTier(client.points);
-
-  return (
-    <Modal title={`${client.shopName} — Activité client`} onClose={onClose} wide>
-      <div className="grid sm:grid-cols-2 gap-3 mb-2">
-        <div className="text-sm text-stone-500">
-          <p><span className="text-stone-400">Contact :</span> {client.contactName}</p>
-          <p><span className="text-stone-400">Ville :</span> {client.city}</p>
-        </div>
-        <div className="text-sm text-stone-500">
-          <p><span className="text-stone-400">Niveau fidélité :</span> <span style={{ color: tier.color }} className="font-medium">{tier.key}</span></p>
-          <p><span className="text-stone-400">Cagnotte actuelle :</span> <span className="text-emerald-700 font-medium">{fmtMAD(client.cashbackBalance || 0)}</span></p>
-        </div>
-      </div>
-
-      {stats ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 my-4">
-          <StatCard label="Total dépensé" value={fmtMAD(stats.totalSpent)} icon={Wallet} accent="#3B8C6E" />
-          <StatCard label="Nombre d'achats" value={stats.count} icon={Receipt} accent="#6B4E9E" />
-          <StatCard label="Panier moyen" value={fmtMAD(stats.avgBasket)} icon={TrendingUp} accent="#4A6E8C" />
-          <StatCard
-            label="Écart moyen entre achats"
-            value={stats.avgGap !== null ? `${stats.avgGap} j` : "—"}
-            icon={Calendar}
-            accent="#C8862E"
-          />
-          <StatCard label="Jours depuis dernier achat" value={`${stats.daysSinceLast} j`} icon={Clock} accent="#B23A55" />
-          <StatCard label="Marque préférée" value={stats.topBrand} icon={Tag} accent="#6B4E9E" />
-        </div>
-      ) : (
-        <EmptyState icon={Receipt} text="Aucun achat enregistré pour ce client." />
-      )}
-
-      {clientSales.length > 0 && (
-        <>
-          <p className="text-sm font-medium text-stone-700 mb-2 mt-5">Historique des achats</p>
-          <div className="max-h-80 overflow-y-auto border border-stone-200 rounded-xl">
-            <table className="w-full text-sm">
-              <thead className="bg-stone-50 text-stone-500 text-xs sticky top-0">
-                <tr>
-                  <th className="text-left px-3 py-2 font-medium">Date</th>
-                  <th className="text-left px-3 py-2 font-medium">Écart</th>
-                  <th className="text-left px-3 py-2 font-medium">Article</th>
-                  <th className="text-right px-3 py-2 font-medium">Qté</th>
-                  <th className="text-right px-3 py-2 font-medium">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {clientSales.map((s, i) => {
-                  const prev = clientSales[i + 1];
-                  const gap = prev ? Math.round((new Date(s.date) - new Date(prev.date)) / (1000 * 60 * 60 * 24)) : null;
-                  return (
-                    <tr key={s.id} className="border-t border-stone-100">
-                      <td className="px-3 py-2 text-stone-600">{fmtDate(s.date)}</td>
-                      <td className="px-3 py-2 text-stone-400 text-xs">{gap !== null ? `+${gap} j` : "—"}</td>
-                      <td className="px-3 py-2">
-                        <span className="font-mono text-xs text-stone-500">{s.sku}</span>{" "}
-                        <Badge color={BRAND_COLORS[s.brand]?.text} bg={BRAND_COLORS[s.brand]?.light}>{s.brand}</Badge>
-                      </td>
-                      <td className="px-3 py-2 text-right text-stone-600">{s.quantity}</td>
-                      <td className="px-3 py-2 text-right font-medium text-stone-800">{fmtMAD(s.total)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </Modal>
-  );
-}
-
 function ClientsModule({ data, setData }) {
   const [search, setSearch] = useState("");
   const [tierFilter, setTierFilter] = useState("Tous");
@@ -1996,7 +1838,6 @@ function ClientsModule({ data, setData }) {
   const [awardModal, setAwardModal] = useState(null);
   const [cashbackModal, setCashbackModal] = useState(null);
   const [tiersSettingsOpen, setTiersSettingsOpen] = useState(false);
-  const [detailClient, setDetailClient] = useState(null);
 
   const filtered = useMemo(() => {
     return data.clients.filter((c) => {
@@ -2084,33 +1925,31 @@ function ClientsModule({ data, setData }) {
             const tier = getTier(c.points);
             return (
               <div key={c.id} className="bg-white rounded-2xl border border-stone-200 p-4">
-                <div onClick={() => setDetailClient(c)} className="cursor-pointer">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="min-w-0">
-                      <p className="font-semibold text-stone-900 text-sm truncate hover:text-indigo-700">{c.shopName}</p>
-                      <p className="text-xs text-stone-400">{c.contactName}</p>
-                    </div>
-                    <span className="text-xs font-medium px-2 py-0.5 rounded-full shrink-0" style={{ color: tier.color, background: tier.bg }}>
-                      {tier.key}
-                    </span>
+                <div className="flex items-start justify-between mb-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-stone-900 text-sm truncate">{c.shopName}</p>
+                    <p className="text-xs text-stone-400">{c.contactName}</p>
                   </div>
-                  <div className="flex items-center gap-1.5 text-xs text-stone-500 mb-2">
-                    <MapPin size={12} /> {c.city}
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full shrink-0" style={{ color: tier.color, background: tier.bg }}>
+                    {tier.key}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-stone-500 mb-2">
+                  <MapPin size={12} /> {c.city}
+                </div>
+                <div className="flex gap-1.5 flex-wrap mb-3">
+                  {c.brands.map((b) => (
+                    <Badge key={b} color={BRAND_COLORS[b]?.text} bg={BRAND_COLORS[b]?.light}>{b}</Badge>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between text-sm border-t border-stone-100 pt-2.5">
+                  <div>
+                    <p className="text-xs text-stone-400">Points</p>
+                    <p className="font-semibold text-stone-800">{fmtNum(c.points)}</p>
                   </div>
-                  <div className="flex gap-1.5 flex-wrap mb-3">
-                    {c.brands.map((b) => (
-                      <Badge key={b} color={BRAND_COLORS[b]?.text} bg={BRAND_COLORS[b]?.light}>{b}</Badge>
-                    ))}
-                  </div>
-                  <div className="flex items-center justify-between text-sm border-t border-stone-100 pt-2.5">
-                    <div>
-                      <p className="text-xs text-stone-400">Points</p>
-                      <p className="font-semibold text-stone-800">{fmtNum(c.points)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-stone-400">Total dépensé</p>
-                      <p className="font-semibold text-stone-800">{fmtMAD(c.totalSpent)}</p>
-                    </div>
+                  <div>
+                    <p className="text-xs text-stone-400">Total dépensé</p>
+                    <p className="font-semibold text-stone-800">{fmtMAD(c.totalSpent)}</p>
                   </div>
                 </div>
                 {c.cashbackRate > 0 && (
@@ -2127,7 +1966,7 @@ function ClientsModule({ data, setData }) {
                 <div className="flex gap-1.5 mt-3">
                   <Button size="sm" variant="secondary" onClick={() => setAwardModal(c)}>Attribuer points</Button>
                   <button onClick={() => setModal(c)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                  <DeleteButton onConfirm={() => deleteClient(c.id)} label="Supprimer ce client ?" />
+                  <button onClick={() => deleteClient(c.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
                 </div>
               </div>
             );
@@ -2161,9 +2000,6 @@ function ClientsModule({ data, setData }) {
             onCancel={() => setTiersSettingsOpen(false)}
           />
         </Modal>
-      )}
-      {detailClient && (
-        <ClientDetailModal client={detailClient} data={data} onClose={() => setDetailClient(null)} />
       )}
     </div>
   );
@@ -2295,7 +2131,7 @@ function OffersModule({ data, setData }) {
                     {o.active ? "Désactiver" : "Activer"}
                   </Button>
                   <button onClick={() => setModal(o)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                  <DeleteButton onConfirm={() => deleteOffer(o.id)} label="Supprimer cette offre ?" />
+                  <button onClick={() => deleteOffer(o.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
                 </div>
               </div>
             );
@@ -2621,7 +2457,7 @@ function StockModule({ data, setData }) {
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1 justify-end">
                         <button onClick={() => setModal(s)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                        <DeleteButton onConfirm={() => deleteItem(s.id)} label="Supprimer cette référence ?" />
+                        <button onClick={() => deleteItem(s.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
                       </div>
                     </td>
                   </tr>
@@ -2664,7 +2500,7 @@ function StockModule({ data, setData }) {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium text-stone-700">+{fmtNum(p.quantity)}</span>
-                    <DeleteButton onConfirm={() => deleteBoxPurchase(p.id)} size={13} className="p-1 rounded hover:bg-rose-50 text-rose-500" label="Supprimer cet achat ?" />
+                    <button onClick={() => deleteBoxPurchase(p.id)} className="p-1 rounded hover:bg-rose-50 text-rose-500"><Trash2 size={13} /></button>
                   </div>
                 </div>
               ))}
@@ -2688,7 +2524,7 @@ function StockModule({ data, setData }) {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium text-stone-700">+{fmtNum(p.quantity)}</span>
-                    <DeleteButton onConfirm={() => deleteTypePurchase(p.id)} size={13} className="p-1 rounded hover:bg-rose-50 text-rose-500" label="Supprimer cet achat ?" />
+                    <button onClick={() => deleteTypePurchase(p.id)} className="p-1 rounded hover:bg-rose-50 text-rose-500"><Trash2 size={13} /></button>
                   </div>
                 </div>
               ))}
@@ -2766,30 +2602,11 @@ function SaleForm({ clients, employees, stock, onSave, onCancel }) {
 
 function SalesModule({ data, setData }) {
   const [modal, setModal] = useState(null);
-  const [dateFilter, setDateFilter] = useState("today"); // "today" | "all" | "custom"
-  const [customDate, setCustomDate] = useState(todayISO());
-  const [clientFilter, setClientFilter] = useState("Tous");
 
   const sortedSales = useMemo(() => [...data.sales].sort((a, b) => new Date(b.date) - new Date(a.date)), [data.sales]);
-
-  const displayedSales = useMemo(() => {
-    let list = sortedSales;
-    if (dateFilter === "today") {
-      list = list.filter((s) => s.date === todayISO());
-    } else if (dateFilter === "custom") {
-      list = list.filter((s) => s.date === customDate);
-    }
-    if (clientFilter !== "Tous") {
-      list = list.filter((s) => s.clientId === clientFilter);
-    }
-    return list;
-  }, [sortedSales, dateFilter, customDate, clientFilter]);
-
   const total = useMemo(() => data.sales.reduce((s, x) => s + x.total, 0), [data.sales]);
   const avg = data.sales.length ? total / data.sales.length : 0;
   const brandsUsed = new Set(data.sales.map((s) => s.brand)).size;
-
-  const displayedTotal = useMemo(() => displayedSales.reduce((s, x) => s + x.total, 0), [displayedSales]);
 
   const saveSale = (sale) => {
     setData((d) => ({
@@ -2833,36 +2650,8 @@ function SalesModule({ data, setData }) {
         <StatCard label="Marques vendues" value={brandsUsed} icon={Tag} accent="#C8862E" />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2.5 mb-4">
-        <div className="flex rounded-lg border border-stone-200 overflow-hidden">
-          {[
-            { key: "today", label: "Aujourd'hui" },
-            { key: "custom", label: "Une date" },
-            { key: "all", label: "Toutes" },
-          ].map((opt) => (
-            <button
-              key={opt.key}
-              onClick={() => setDateFilter(opt.key)}
-              className={`px-3 py-2 text-sm font-medium ${dateFilter === opt.key ? "bg-indigo-700 text-white" : "bg-white text-stone-600 hover:bg-stone-50"}`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-        {dateFilter === "custom" && (
-          <input type="date" className={inputCls + " w-auto"} value={customDate} onChange={(e) => setCustomDate(e.target.value)} />
-        )}
-        <select className={selectCls + " w-auto"} value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}>
-          <option value="Tous">Tous les clients</option>
-          {data.clients.map((c) => <option key={c.id} value={c.id}>{c.shopName}</option>)}
-        </select>
-        <span className="text-sm text-stone-500 ml-auto">
-          {displayedSales.length} vente(s) — <strong className="text-stone-800">{fmtMAD(displayedTotal)}</strong>
-        </span>
-      </div>
-
-      {displayedSales.length === 0 ? (
-        <EmptyState icon={Receipt} text="Aucune vente ne correspond à ces critères." />
+      {sortedSales.length === 0 ? (
+        <EmptyState icon={Receipt} text="Aucune vente enregistrée." />
       ) : (
         <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden overflow-x-auto">
           <table className="w-full text-sm">
@@ -2879,7 +2668,7 @@ function SalesModule({ data, setData }) {
               </tr>
             </thead>
             <tbody>
-              {displayedSales.slice(0, 200).map((s) => {
+              {sortedSales.slice(0, 100).map((s) => {
                 const client = data.clients.find((c) => c.id === s.clientId);
                 const emp = data.employees.find((e) => e.id === s.employeeId);
                 const commissionRate = emp?.commissionRate || 0;
@@ -2903,15 +2692,15 @@ function SalesModule({ data, setData }) {
                       )}
                     </td>
                     <td className="px-4 py-2.5">
-                      <DeleteButton onConfirm={() => deleteSale(s.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500 ml-auto block" label="Supprimer cette vente ?" />
+                      <button onClick={() => deleteSale(s.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500 ml-auto block"><Trash2 size={14} /></button>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          {displayedSales.length > 200 && (
-            <p className="text-xs text-stone-400 text-center py-3">Affichage des 200 ventes les plus récentes sur {displayedSales.length}.</p>
+          {sortedSales.length > 100 && (
+            <p className="text-xs text-stone-400 text-center py-3">Affichage des 100 ventes les plus récentes sur {sortedSales.length}.</p>
           )}
         </div>
       )}
@@ -3175,7 +2964,7 @@ function ChequesModule({ data, setData }) {
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1 justify-end">
                         <button onClick={() => setModal(c)} className="p-1.5 rounded-lg hover:bg-stone-100 text-stone-500"><Pencil size={14} /></button>
-                        <DeleteButton onConfirm={() => deleteCheque(c.id)} label="Supprimer ce chèque ?" />
+                        <button onClick={() => deleteCheque(c.id)} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"><Trash2 size={14} /></button>
                       </div>
                     </td>
                   </tr>
